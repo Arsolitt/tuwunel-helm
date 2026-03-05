@@ -201,7 +201,7 @@ rtc:
     ## Example:
     ## env:
     ##   LIVEKIT_URL: "wss://matrix-rtc.yourdomain.com"
-    ##   LIVEKIT_JWT_BIND: ":8081"
+    ##   LIVEKIT_JWT_BIND: ":8080"
     env: {}
     
     ## Raw environment variable sections (for complex configurations)

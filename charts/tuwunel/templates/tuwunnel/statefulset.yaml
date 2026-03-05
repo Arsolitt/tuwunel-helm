@@ -19,6 +19,7 @@ metadata:
   name:  {{ template "tuwunel.fullname" . }}
   labels:
     {{- include "tuwunel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tuwunel
   {{- with .Values.statefulsetAnnotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -30,10 +31,12 @@ spec:
   selector:
     matchLabels:
       {{- include "tuwunel.labels" . | nindent 6 }}
+      app.kubernetes.io/component: tuwunel
   template:
     metadata:
       labels:
         {{- include "tuwunel.labels" . | nindent 8 }}
+        app.kubernetes.io/component: tuwunel
     spec:
       securityContext:
         sysctls:

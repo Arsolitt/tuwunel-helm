@@ -24,7 +24,7 @@ spec:
           imagePullPolicy: {{ .Values.rtc.jwt.image.pullPolicy }}
           ports:
             - name: http
-              containerPort: 8081
+              containerPort: 8080
           {{- if or (.Values.rtc.jwt.env) (.Values.rtc.jwt.envRaw) (.Values.rtc.jwt.envFromSecret) }}
           env:
           {{- range $key, $val := .Values.rtc.jwt.env }}
