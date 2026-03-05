@@ -105,3 +105,41 @@ nodeSelector: {}
 tolerations: []
 
 affinity: {}
+
+## Matrix RTC configuration (optional)
+## Full configuration added in Task 10
+rtc:
+  enabled: false
+  domain: ""
+  jwt:
+    image:
+      repository: ghcr.io/element-hq/lk-jwt-service
+      tag: latest
+      pullPolicy: IfNotPresent
+    envFromSecret: {}
+  livekit:
+    image:
+      repository: livekit/livekit-server
+      tag: latest
+      pullPolicy: IfNotPresent
+    envFromSecret: {}
+    networkMode: "loadBalancer"
+    service:
+      type: LoadBalancer
+      externalTrafficPolicy: Local
+    config:
+      port: 7880
+      bind_addresses: [""]
+      rtc:
+        tcp_port: 7881
+        port_range_start: 50100
+        port_range_end: 50200
+        use_external_ip: true
+        enable_loopback_candidate: false
+      keys: {}
+  ingress:
+    enabled: false
+    class: ""
+    annotations: {}
+    tls: false
+    tlsSecretName: ""
