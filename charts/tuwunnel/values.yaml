@@ -3,6 +3,37 @@
 ## You probably want this to be your apex domain.
 server_name: ""
 
+## Example full RTC configuration (for quick reference)
+## Uncomment and modify as needed:
+# rtc:
+#   enabled: true
+#   domain: "matrix-rtc.yourdomain.com"
+#   jwt:
+#     envFromSecret:
+#       LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
+#       LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
+#       LIVEKIT_URL: "wss://matrix-rtc.yourdomain.com"
+#       LIVEKIT_FULL_ACCESS_HOMESERVERS: "yourdomain.com"
+#   livekit:
+#     envFromSecret:
+#       LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
+#       LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
+#     config:
+#       keys:
+#         "${LIVEKIT_KEY}": "${LIVEKIT_SECRET}"
+#   ingress:
+#     enabled: true
+#     class: nginx
+#     tls: true
+# 
+# ## Then add to config.global.well_known:
+# config:
+#   global:
+#     well_known:
+#       rtc_transports:
+#         - type: livekit
+#           livekit_service_url: "https://matrix-rtc.yourdomain.com"
+
 image:
   repository: forgejo.ellis.link/continuwuation/continuwuity
   tag: latest-maxperf
@@ -25,7 +56,23 @@ config:
     allow_federation: "false"
     trusted_servers: []
     tls: {}
+    
+    ## Well-known configuration
+    ## Used for Matrix server discovery and RTC services
     well_known: {}
+    ## Example with RTC configuration:
+    # well_known:
+    #   ## Client delegation (if using delegated domain)
+    #   client: "https://matrix.yourdomain.com"
+    #   server: "matrix.yourdomain.com:443"
+    #   
+    #   ## RTC transports for Element Call
+    #   ## This enables Matrix RTC functionality
+    #   ## Replace matrix-rtc.yourdomain.com with your RTC domain
+    #   rtc_transports:
+    #     - type: livekit
+    #       livekit_service_url: "https://matrix-rtc.yourdomain.com"
+    
     ## If you are delegating your apex domain, uncomment the client and server lines
     ## and replace the domains with the domain your service is running on
     #  client: "https://matrix.example.com"
@@ -106,40 +153,137 @@ tolerations: []
 
 affinity: {}
 
-## Matrix RTC configuration (optional)
-## Full configuration added in Task 10
+## Matrix RTC (Real-Time Communication) Configuration
+## Enables Element Call functionality via LiveKit integration
+## 
+## Prerequisites:
+## 1. Create Kubernetes secret with LiveKit credentials:
+##    kubectl create secret generic livekit-secrets \
+##      --from-literal=LIVEKIT_KEY=<20-char-key> \
+##      --from-literal=LIVEKIT_SECRET=<64-char-secret>
+##
+## 2. Configure DNS for RTC domain (e.g., matrix-rtc.yourdomain.com)
+##
+## 3. Update config.global.well_known.rtc_transports with your RTC domain
+##
+## Documentation: https://github.com/element-hq/lk-jwt-service
 rtc:
+  ## Enable Matrix RTC support (default: false)
   enabled: false
+  
+  ## RTC domain where LiveKit services will be accessible
+  ## Example: matrix-rtc.yourdomain.com
+  ## This domain needs DNS configured to point to your cluster
   domain: ""
+  
+  ## JWT Service Configuration
+  ## Handles authentication tokens for LiveKit
   jwt:
     image:
       repository: ghcr.io/element-hq/lk-jwt-service
       tag: latest
       pullPolicy: IfNotPresent
+    
+    ## Environment variables from Kubernetes secrets
+    ## Format: VARIABLE_NAME: secret-name/key-name
+    ## The secret must contain LIVEKIT_KEY and LIVEKIT_SECRET
+    ## 
+    ## Example:
+    ## envFromSecret:
+    ##   LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
+    ##   LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
+    ##   LIVEKIT_JWT_BIND: ":8081"
+    ##   LIVEKIT_URL: "wss://matrix-rtc.yourdomain.com"
+    ##   LIVEKIT_FULL_ACCESS_HOMESERVERS: "yourdomain.com"
     envFromSecret: {}
+  
+  ## LiveKit Media Server Configuration
+  ## Handles WebRTC media streams for calls
   livekit:
     image:
       repository: livekit/livekit-server
       tag: latest
       pullPolicy: IfNotPresent
+    
+    ## Environment variables from Kubernetes secrets
+    ## At minimum, requires LIVEKIT_KEY and LIVEKIT_SECRET
+    ## 
+    ## Example:
+    ## envFromSecret:
+    ##   LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
+    ##   LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
     envFromSecret: {}
+    
+    ## Network mode for LiveKit pods
+    ## Options:
+    ##   - "loadBalancer": Uses Kubernetes LoadBalancer service (recommended)
+    ##     Preserves client source IP with externalTrafficPolicy: Local
+    ##     Requires cloud provider LoadBalancer support
+    ##   - "hostNetwork": Pod uses host network namespace
+    ##     Direct access to host ports
+    ##     Required for some bare-metal setups
     networkMode: "loadBalancer"
+    
+    ## Service configuration (only used when networkMode is "loadBalancer")
     service:
       type: LoadBalancer
+      ## Preserves client source IP address
+      ## Required for proper WebRTC connection establishment
       externalTrafficPolicy: Local
+      ## Optional: Static LoadBalancer IP (cloud-specific)
+      # loadBalancerIP: ""
+      ## Optional: Additional service annotations
+      # annotations: {}
+    
+    ## LiveKit server configuration
+    ## This is converted to livekit.yaml and processed with envsubst
+    ## Documentation: https://docs.livekit.io/guides/getting-started
     config:
+      ## HTTP server port
       port: 7880
+      ## Network interfaces to bind (empty = all interfaces)
       bind_addresses: [""]
+      
+      ## WebRTC configuration
       rtc:
+        ## TCP port for RTC connections
         tcp_port: 7881
+        ## UDP port range for media streams
+        ## These ports must be accessible from clients
+        ## For LoadBalancer mode, configure your cloud provider
+        ## For hostNetwork mode, ensure firewall allows these ports
         port_range_start: 50100
         port_range_end: 50200
+        ## Use external IP for ICE candidates (recommended)
         use_external_ip: true
+        ## Disable loopback ICE candidates (for security)
         enable_loopback_candidate: false
+      
+      ## LiveKit API keys
+      ## Use envsubst placeholders that will be replaced from secrets
+      ## Example:
+      ## keys:
+      ##   "${LIVEKIT_KEY}": "${LIVEKIT_SECRET}"
       keys: {}
+  
+  ## Ingress configuration for RTC domain
   ingress:
+    ## Enable RTC ingress (default: false)
     enabled: false
+    
+    ## Ingress class (e.g., nginx, traefik)
     class: ""
+    
+    ## Additional annotations for ingress
+    ## Example for nginx-ingress:
+    ## annotations:
+    ##   cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    ##   nginx.ingress.kubernetes.io/proxy-body-size: "0"
     annotations: {}
+    
+    ## Enable TLS (recommended for production)
     tls: false
+    
+    ## TLS secret name (defaults to <release-name>-rtc-tls)
+    ## Required if tls is enabled
     tlsSecretName: ""
