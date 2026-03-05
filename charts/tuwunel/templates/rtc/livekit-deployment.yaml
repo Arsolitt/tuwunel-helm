@@ -66,6 +66,13 @@ spec:
               containerPort: {{ .Values.rtc.livekit.config.port }}
             - name: rtc-tcp
               containerPort: {{ .Values.rtc.livekit.config.rtc.tcp_port }}
+            {{- $start := int .Values.rtc.livekit.config.rtc.port_range_start }}
+            {{- $end := int .Values.rtc.livekit.config.rtc.port_range_end }}
+            {{- range $i := until (int (sub $end $start)) }}
+            - name: rtc-udp-{{ add $start $i }}
+              containerPort: {{ add $start $i }}
+              protocol: UDP
+            {{- end }}
           volumeMounts:
             - name: config
               mountPath: /config

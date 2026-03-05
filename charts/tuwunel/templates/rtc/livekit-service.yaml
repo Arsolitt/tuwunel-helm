@@ -1,4 +1,4 @@
-{{- if and .Values.rtc.enabled (eq .Values.rtc.livekit.networkMode "loadBalancer") -}}
+{{- if .Values.rtc.enabled -}}
 apiVersion: v1
 kind: Service
 metadata:
@@ -11,11 +11,11 @@ metadata:
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
-  type: {{ .Values.rtc.livekit.service.type }}
-  {{- if .Values.rtc.livekit.service.externalTrafficPolicy }}
+  type: {{ if eq .Values.rtc.livekit.networkMode "loadBalancer" }}{{ .Values.rtc.livekit.service.type }}{{ else }}ClusterIP{{ end }}
+  {{- if and (eq .Values.rtc.livekit.networkMode "loadBalancer") .Values.rtc.livekit.service.externalTrafficPolicy }}
   externalTrafficPolicy: {{ .Values.rtc.livekit.service.externalTrafficPolicy }}
   {{- end }}
-  {{- if .Values.rtc.livekit.service.loadBalancerIP }}
+  {{- if and (eq .Values.rtc.livekit.networkMode "loadBalancer") .Values.rtc.livekit.service.loadBalancerIP }}
   loadBalancerIP: {{ .Values.rtc.livekit.service.loadBalancerIP }}
   {{- end }}
   ports:
@@ -23,10 +23,20 @@ spec:
       port: {{ .Values.rtc.livekit.config.port }}
       targetPort: http
       protocol: TCP
+    {{- if eq .Values.rtc.livekit.networkMode "loadBalancer" }}
     - name: rtc-tcp
       port: {{ .Values.rtc.livekit.config.rtc.tcp_port }}
       targetPort: rtc-tcp
       protocol: TCP
+    {{- $start := int .Values.rtc.livekit.config.rtc.port_range_start }}
+    {{- $end := int .Values.rtc.livekit.config.rtc.port_range_end }}
+    {{- range $i := until (int (sub $end $start)) }}
+    - name: rtc-udp-{{ add $start $i }}
+      port: {{ add $start $i }}
+      targetPort: {{ add $start $i }}
+      protocol: UDP
+    {{- end }}
+    {{- end }}
   selector:
     {{- include "tuwunel.labels" $ | nindent 4 }}
     app.kubernetes.io/component: rtc-livekit
