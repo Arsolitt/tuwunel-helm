@@ -39,6 +39,26 @@ spec:
         sysctls:
           - name: net.ipv4.ip_unprivileged_port_start
             value: "0"
+      initContainers:
+        - name: config-processor
+          image: "{{ .Values.initContainer.image.repository }}:{{ .Values.initContainer.image.tag }}"
+          imagePullPolicy: {{ .Values.initContainer.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - envsubst < /config-template/config.toml > /config/config.toml
+          env:
+            {{- range $key, $val := .Values.config.global.envFromSecret }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ (split "/" $val)._0 }}
+                  key: {{ (split "/" $val)._1 }}
+            {{- end }}
+          volumeMounts:
+            - name: config-template
+              mountPath: /config-template
+            - name: config
+              mountPath: /config
       containers:
         - name: tuwunel
           image: "{{ .Values.image.repository }}:{{ tpl .Values.image.tag . }}"
@@ -99,6 +119,8 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
-        - name: config
+        - name: config-template
           configMap:
             name: {{ template "tuwunel.fullname" . }}-configmap
+        - name: config
+          emptyDir: {}
