@@ -8,6 +8,13 @@ image:
   tag: latest-maxperf
   pullPolicy: IfNotPresent
 
+## Init container for envsubst
+initContainer:
+  image:
+    repository: busybox
+    tag: latest
+    pullPolicy: IfNotPresent
+
 ## The keys under config must be valid for the configuration file of
 ## Conduwuit, Tuwunel, or Continuwuity as this section is converted into
 ## the configuration file
