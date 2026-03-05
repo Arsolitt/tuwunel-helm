@@ -28,14 +28,25 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - envsubst < /config-template/livekit.yaml > /config/livekit.yaml
+          {{- if or (.Values.rtc.livekit.env) (.Values.rtc.livekit.envRaw) (.Values.rtc.livekit.envFromSecret) }}
           env:
-            {{- range $key, $val := .Values.rtc.livekit.envFromSecret }}
+          {{- range $key, $val := .Values.rtc.livekit.env }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+          {{- end }}
+          {{- if .Values.rtc.livekit.envRaw }}
+            {{- with .Values.rtc.livekit.envRaw }}
+              {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- range $key, $val := .Values.rtc.livekit.envFromSecret }}
             - name: {{ $key }}
               valueFrom:
                 secretKeyRef:
                   name: {{ (split "/" $val)._0 }}
                   key: {{ (split "/" $val)._1 }}
-            {{- end }}
+          {{- end }}
+          {{- end }}
           volumeMounts:
             - name: config-template
               mountPath: /config-template

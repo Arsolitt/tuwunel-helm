@@ -25,14 +25,25 @@ spec:
           ports:
             - name: http
               containerPort: 8081
+          {{- if or (.Values.rtc.jwt.env) (.Values.rtc.jwt.envRaw) (.Values.rtc.jwt.envFromSecret) }}
           env:
-            {{- range $key, $val := .Values.rtc.jwt.envFromSecret }}
+          {{- range $key, $val := .Values.rtc.jwt.env }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+          {{- end }}
+          {{- if .Values.rtc.jwt.envRaw }}
+            {{- with .Values.rtc.jwt.envRaw }}
+              {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- range $key, $val := .Values.rtc.jwt.envFromSecret }}
             - name: {{ $key }}
               valueFrom:
                 secretKeyRef:
                   name: {{ (split "/" $val)._0 }}
                   key: {{ (split "/" $val)._1 }}
-            {{- end }}
+          {{- end }}
+          {{- end }}
           resources:
             requests:
               cpu: 100m

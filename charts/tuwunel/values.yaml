@@ -9,11 +9,12 @@ server_name: ""
 #   enabled: true
 #   domain: "matrix-rtc.yourdomain.com"
 #   jwt:
+#     env:
+#       LIVEKIT_URL: "wss://matrix-rtc.yourdomain.com"
+#       LIVEKIT_FULL_ACCESS_HOMESERVERS: "yourdomain.com"
 #     envFromSecret:
 #       LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
 #       LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
-#       LIVEKIT_URL: "wss://matrix-rtc.yourdomain.com"
-#       LIVEKIT_FULL_ACCESS_HOMESERVERS: "yourdomain.com"
 #   livekit:
 #     envFromSecret:
 #       LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
@@ -56,6 +57,16 @@ config:
     allow_federation: "false"
     trusted_servers: []
     tls: {}
+    
+    ## Plain text environment variables
+    env: {}
+    
+    ## Raw environment variable sections (for complex configurations)
+    envRaw: []
+    
+    ## Environment variables from Kubernetes secrets
+    ## Format: VARIABLE_NAME: secret-name/key-name
+    envFromSecret: {}
     
     ## Well-known configuration
     ## Used for Matrix server discovery and RTC services
@@ -184,6 +195,16 @@ rtc:
       tag: 0.4.1
       pullPolicy: IfNotPresent
     
+    ## Plain text environment variables
+    ## Example:
+    ## env:
+    ##   LIVEKIT_URL: "wss://matrix-rtc.yourdomain.com"
+    ##   LIVEKIT_JWT_BIND: ":8081"
+    env: {}
+    
+    ## Raw environment variable sections (for complex configurations)
+    envRaw: []
+    
     ## Environment variables from Kubernetes secrets
     ## Format: VARIABLE_NAME: secret-name/key-name
     ## The secret must contain LIVEKIT_KEY and LIVEKIT_SECRET
@@ -192,9 +213,6 @@ rtc:
     ## envFromSecret:
     ##   LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
     ##   LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
-    ##   LIVEKIT_JWT_BIND: ":8081"
-    ##   LIVEKIT_URL: "wss://matrix-rtc.yourdomain.com"
-    ##   LIVEKIT_FULL_ACCESS_HOMESERVERS: "yourdomain.com"
     envFromSecret: {}
   
   ## LiveKit Media Server Configuration
@@ -204,6 +222,12 @@ rtc:
       repository: livekit/livekit-server
       tag: v1.9.11
       pullPolicy: IfNotPresent
+    
+    ## Plain text environment variables
+    env: {}
+    
+    ## Raw environment variable sections (for complex configurations)
+    envRaw: []
     
     ## Environment variables from Kubernetes secrets
     ## At minimum, requires LIVEKIT_KEY and LIVEKIT_SECRET

@@ -46,14 +46,25 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - envsubst < /config-template/config.toml > /config/config.toml
+          {{- if or (.Values.config.global.env) (.Values.config.global.envRaw) (.Values.config.global.envFromSecret) }}
           env:
-            {{- range $key, $val := .Values.config.global.envFromSecret }}
+          {{- range $key, $val := .Values.config.global.env }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+          {{- end }}
+          {{- if .Values.config.global.envRaw }}
+            {{- with .Values.config.global.envRaw }}
+              {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- range $key, $val := .Values.config.global.envFromSecret }}
             - name: {{ $key }}
               valueFrom:
                 secretKeyRef:
                   name: {{ (split "/" $val)._0 }}
                   key: {{ (split "/" $val)._1 }}
-            {{- end }}
+          {{- end }}
+          {{- end }}
           volumeMounts:
             - name: config-template
               mountPath: /config-template
