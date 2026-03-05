@@ -1,11 +1,30 @@
-# Conduwuit
+# Tuwunel Helm Chart
 
-This helm chart started out as a fork of the [tuwunel-helm][tuwunel-helm] chart. There's been a bunch of drama between forks since [conduwuit][conduwuit] shuttered. This repo works for both [tuwunel][tuwunel-homepage] and [continuwuity][cont-homepage] and probably any other forks of conduwuit. If it doesn't open an issue and I'll see what I can do for it.
+Helm chart for deploying [Tuwunel](https://github.com/matrix-construct/tuwunel) - a Matrix homeserver based on Conduit.
 
-## TL;DR;
+This chart is designed for tuwunel but can also work with other Conduit forks such as [Continuwuity](https://continuwuity.org/).
+
+> **Note:** This chart is based on [modern-conduwuit-helm](https://github.com/magikid/modern-conduwuit-helm) by magikid.
+
+## Features
+
+- Matrix homeserver deployment
+- Optional Matrix RTC support via LiveKit (Element Call)
+- Persistent storage support
+- Ingress configuration
+- Resource management
+
+## Add Repository
 
 ```console
-helm install --set server_name=matrix.example.org oci://ghcr.io/magikid/modern-conduwuit-helm/conduwuit
+helm repo add tuwunel https://arsolitt.github.io/tuwunel-helm
+helm repo update
+```
+
+## TL;DR
+
+```console
+helm install --set config.server_name=matrix.example.org tuwunel/tuwunel
 ```
 
 ## Installing the Chart
@@ -13,7 +32,7 @@ helm install --set server_name=matrix.example.org oci://ghcr.io/magikid/modern-c
 To install the chart with the release name `my-release`:
 
 ```console
-helm install --name my-release oci://ghcr.io/magikid/modern-conduwuit-helm/conduwuit
+helm install my-release tuwunel/tuwunel
 ```
 
 ## Uninstalling the Chart
@@ -21,7 +40,7 @@ helm install --name my-release oci://ghcr.io/magikid/modern-conduwuit-helm/condu
 To uninstall/delete the `my-release` deployment:
 
 ```console
-helm delete my-release
+helm uninstall my-release
 ```
 
 The command removes all the Kubernetes components associated with the chart and deletes the release.
@@ -32,8 +51,8 @@ The following tables lists the configurable parameters of the tuwunel chart and 
 
 | Parameter                          | Description                                                                                 | Default                            |
 | ---------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `image.repository`                 | Image repository                                                                            | `ghcr.io/matrix-construct/tuwunel` |
-| `image.tag`                        | Image tag. Possible values listed [here][docker].                                           | `v1.4.1`                           |
+| `image.repository`                 | Image repository                                                                            | `ghcr.io/matrix-construct/tuwunel`        |
+| `image.tag`                        | Image tag                                                                                   | `v1.5.0`                           |
 | `image.pullPolicy`                 | Image pull policy                                                                           | `IfNotPresent`                     |
 | `config.server_name`               | Server name                                                                                 | `your.server.name`                 |
 | `config.max_request_size`          | Maximum upload size                                                                         | `20000000` (20MB)                  |
@@ -54,8 +73,8 @@ The following tables lists the configurable parameters of the tuwunel chart and 
 | `ingress.class`                    | Ingress class (included in annotations)                                                     | ``                                 |
 | `ingress.annotations`              | Ingress annotations                                                                         | `{}`                               |
 | `ingress.path`                     | Ingress path                                                                                | `/`                                |
-| `ingress.hosts`                    | Ingress accepted hostnames                                                                  | `[tuwunel]`                        |
-| `ingress.tls`                      | Whether or not to configure TLS for the ingerss                                             | `false`                            |
+| `ingress.hosts`                    | Ingress accepted hostnames                                                                  | `[tuwunel]`                       |
+| `ingress.tls`                      | Whether or not to configure TLS for the ingress                                             | `false`                            |
 | `persistence.data.enabled`         | Use persistent volume to store data                                                         | `true`                             |
 | `persistence.data.size`            | Size of persistent volume claim                                                             | `1Gi`                              |
 | `persistence.data.existingClaim`   | Use an existing PVC to persist data                                                         | ``                                 |
@@ -70,33 +89,31 @@ The following tables lists the configurable parameters of the tuwunel chart and 
 Specify each parameter using the `--set key=value[,key=value]` argument to `helm install`. For example,
 
 ```console
-helm install --name my-release \
+helm install my-release \
 	--set ingress.enabled=true \
-	oci://ghcr.io/magikid/modern-conduwuit-helm/conduwuit
+	tuwunel/tuwunel
 ```
 
 Alternatively, a YAML file that specifies the values for the above parameters can be provided while installing the chart. For example,
 
 ```console
-helm install --name my-release -f values.yaml oci://ghcr.io/magikid/modern-conduwuit-helm/conduwuit
+helm install my-release -f values.yaml tuwunel/tuwunel
 ```
 
-Read through the [values.yaml](values.yaml) file.
+Read through the [values.yaml](charts/tuwunel/values.yaml) file.
 
-## Matrix RTC (Element Call) Configuration
+## Matrix RTC (Element Call) Support
 
-This chart optionally supports Matrix RTC via LiveKit for Element Call functionality. This enables audio/video calling features in Element Web and other Matrix clients.
+This chart supports Matrix RTC via LiveKit for Element Call functionality. This enables audio/video calling features in Element Web and other Matrix clients.
 
 ### Prerequisites
 
 1. **Create Kubernetes secret with LiveKit credentials:**
 
 ```bash
-# Generate random credentials
 LIVEKIT_KEY=$(openssl rand -hex 10)
 LIVEKIT_SECRET=$(openssl rand -hex 32)
 
-# Create secret
 kubectl create secret generic livekit-secrets \
   --from-literal=LIVEKIT_KEY=$LIVEKIT_KEY \
   --from-literal=LIVEKIT_SECRET=$LIVEKIT_SECRET
@@ -111,12 +128,10 @@ kubectl create secret generic livekit-secrets \
 Add the following to your `values.yaml`:
 
 ```yaml
-# Enable Matrix RTC
 rtc:
   enabled: true
   domain: "matrix-rtc.yourdomain.com"
   
-  # JWT service (handles authentication)
   jwt:
     envFromSecret:
       LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
@@ -124,7 +139,6 @@ rtc:
       LIVEKIT_URL: "wss://matrix-rtc.yourdomain.com"
       LIVEKIT_FULL_ACCESS_HOMESERVERS: "yourdomain.com"
   
-  # LiveKit media server
   livekit:
     envFromSecret:
       LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
@@ -133,7 +147,6 @@ rtc:
       keys:
         "${LIVEKIT_KEY}": "${LIVEKIT_SECRET}"
   
-  # Ingress for RTC services
   ingress:
     enabled: true
     class: nginx
@@ -141,7 +154,6 @@ rtc:
     annotations:
       cert-manager.io/cluster-issuer: "letsencrypt-prod"
 
-# Configure well-known for RTC discovery
 config:
   global:
     well_known:
@@ -176,17 +188,16 @@ For hostNetwork mode, ensure firewall allows these ports on the node.
 ### Deployment
 
 ```bash
-# Install with RTC enabled
-helm install matrix oci://ghcr.io/magikid/modern-conduwuit-helm/conduwuit \
+helm install matrix tuwunel/tuwunel \
   -f values.yaml \
-  --set server_name=yourdomain.com
+  --set config.server_name=yourdomain.com
 ```
 
 ### Troubleshooting
 
 1. **Check pods are running:**
    ```bash
-   kubectl get pods -l app.kubernetes.io/name=conduwuit
+   kubectl get pods -l app.kubernetes.io/name=tuwunel
    ```
 
 2. **Check LoadBalancer IP:**
@@ -205,16 +216,33 @@ helm install matrix oci://ghcr.io/magikid/modern-conduwuit-helm/conduwuit \
    kubectl logs -l app.kubernetes.io/component=rtc-livekit
    ```
 
-### Additional Resources
+## Using with Other Conduit Forks
 
-- [LiveKit Documentation](https://docs.livekit.io/)
-- [Matrix RTC Specification](https://github.com/matrix-org/matrix-spec-proposals/pull/4143)
-- [Element Call](https://call.element.io/)
+This chart is primarily designed for tuwunel but can work with other Conduit forks like Continuwuity. To use with a different fork, override the image:
 
-[docker]: https://ghcr.io/matrix-construct/tuwunel:latest
-[github]: https://github.com/matrix-construct/tuwunel
-[tuwunel-homepage]: https://tuwunel.chat/
-[cont-homepage]: https://continuwuity.org/
-[conduwuit]: https://gitlab.cronce.io/charts/conduwuit
-[tuwunel-helm]: https://github.com/AreYouLoco/tuwunel-helm
+```yaml
+image:
+  repository: ghcr.io/continuwuity/continuwuity
+  tag: latest
+```
+
+## TODO
+
+- [ ] Support for Coturn (TURN server)
+- [ ] S3 backup support
+- [ ] Backup restoration instructions
+- [ ] Gateway API support
+
+## License
+
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+
+## Credits
+
+Based on [modern-conduwuit-helm](https://github.com/magikid/modern-conduwuit-helm) by [magikid](https://github.com/magikid).
+
+## Additional Resources
+
+- [tuwunel GitHub](https://github.com/matrix-construct/tuwunel)
+
 [delegate]: https://matrix-org.github.io/synapse/v1.46/delegate.html

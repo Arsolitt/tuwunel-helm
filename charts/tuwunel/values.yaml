@@ -35,8 +35,8 @@ server_name: ""
 #           livekit_service_url: "https://matrix-rtc.yourdomain.com"
 
 image:
-  repository: forgejo.ellis.link/continuwuation/continuwuity
-  tag: latest-maxperf
+  repository: ghcr.io/matrix-construct/tuwunel
+  tag: v1.5.0
   pullPolicy: IfNotPresent
 
 ## Init container for envsubst
@@ -181,7 +181,7 @@ rtc:
   jwt:
     image:
       repository: ghcr.io/element-hq/lk-jwt-service
-      tag: latest
+      tag: 0.4.1
       pullPolicy: IfNotPresent
     
     ## Environment variables from Kubernetes secrets
@@ -202,7 +202,7 @@ rtc:
   livekit:
     image:
       repository: livekit/livekit-server
-      tag: latest
+      tag: v1.9.11
       pullPolicy: IfNotPresent
     
     ## Environment variables from Kubernetes secrets
