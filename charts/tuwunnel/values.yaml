@@ -1,0 +1,100 @@
+## This is where people will reach you at.  If you set this to
+## example.com, your usernames will look like steve:example.com.
+## You probably want this to be your apex domain.
+server_name: ""
+
+image:
+  repository: forgejo.ellis.link/continuwuation/continuwuity
+  tag: latest-maxperf
+  pullPolicy: IfNotPresent
+
+## The keys under config must be valid for the configuration file of
+## Conduwuit, Tuwunel, or Continuwuity as this section is converted into
+## the configuration file
+config:
+  global:
+    allow_registration: "true"
+    registration_token: "supa-dupa-secret-token"
+    allow_federation: "false"
+    trusted_servers: []
+    tls: {}
+    well_known: {}
+    ## If you are delegating your apex domain, uncomment the client and server lines
+    ## and replace the domains with the domain your service is running on
+    #  client: "https://matrix.example.com"
+    #  server: "matrix.example.com:443"
+    blurhashing: {}
+    ldap: {}
+    antispam: {}
+      # meowlnir: {}
+      # draupnir: {}
+
+
+extraEnv: []
+
+## Add additional labels to all resources
+extraLabels: {}
+
+## Add annotations to the StatefulSet
+statefulsetAnnotations: {}
+
+service:
+  annotations: {}
+  type: ClusterIP
+  clusterIP: "None"
+
+  port: 80
+  ## List of IP addresses at which the service is available
+  ## Ref: https://kubernetes.io/docs/user-guide/services/#external-ips
+  ##
+  externalIPs: []
+
+  loadBalancerIP: ""
+  loadBalancerSourceRanges: []
+
+ingress:
+  enabled: false
+  class: ""
+  # You will probably want to provide either large upload size limits, or no
+  #    upload size limit; for example, if using nginx-ingress, include
+  #    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+  annotations: {}
+  path: /
+  ## Your server_name and delegated domain (if any) are already added
+  ## to the Ingress
+  extraHosts: []
+  ## If you enable TLS, don't forget to set annotations for cert-manager
+  tls: false
+  ## TLS secret name (defaults to <release-name>-tls if not specified)
+  tlsSecretName: ""
+
+## Persist configuration to a persistent volume
+persistence:
+  ## Data Persistent Volume Storage Class
+  ## If defined, storageClassName: <storageClass>
+  ## If unset, storageClassName: "", which disables dynamic provisioning
+  ## If undefined (the default) or set to null, no storageClassName spec is
+  ##   set, choosing the default provisioner.  (gp2 on AWS, standard on
+  ##   GKE, AWS & OpenStack)
+  ##
+  data:
+    enabled: true
+    existingClaim: ""
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    # Your database and uploads will live here
+    size: 4Gi
+
+resources:
+  requests:
+    cpu: "1"
+    memory: "256Mi"
+  limits:
+    cpu: "2"
+    memory: "512Mi"
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

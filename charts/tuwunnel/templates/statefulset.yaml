@@ -1,0 +1,104 @@
+{{- $threads := 1 }}
+{{- if .Values.resources.limits.cpu }}
+  {{- if typeIs "string" .Values.resources.limits.cpu }}
+    {{- $trimmed := trimSuffix "m" .Values.resources.limits.cpu }}
+    {{- $value := ternary (float64 $trimmed | ceil | mul 1000) $trimmed (contains "." $trimmed) | int64 }}
+    {{- if eq (mod $value 1000) 0 }}
+      {{- $threads = div $value 1000 }}
+    {{- else }}
+      {{- $threads = add1 (div $value 1000) }}
+    {{- end }}
+  {{- else }}
+    {{- $threads = .Values.resources.limits.cpu }}
+  {{- end }}
+{{- end }}
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name:  {{ template "tuwunel.fullname" . }}
+  labels:
+    {{- include "tuwunel.labels" . | nindent 4 }}
+  {{- with .Values.statefulsetAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: 1
+  serviceName: {{ template "tuwunel.fullname" . }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      {{- include "tuwunel.labels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "tuwunel.labels" . | nindent 8 }}
+    spec:
+      securityContext:
+        sysctls:
+          - name: net.ipv4.ip_unprivileged_port_start
+            value: "0"
+      containers:
+        - name: tuwunel
+          image: "{{ .Values.image.repository }}:{{ tpl .Values.image.tag . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+          volumeMounts:
+            - mountPath: /data
+              name: data
+              subPath: data
+            - mountPath: /data/config
+              name: config
+          securityContext:
+            capabilities:
+              add:
+                - NET_BIND_SERVICE
+          env:
+            - name: TOKIO_WORKER_THREADS
+              value: {{ $threads | quote }}
+            - name: CONDUWUIT_CONFIG
+              value: "/data/config/config.toml"
+            - name: CONDUWUIT_SERVER_NAME
+              value: {{ required "You must set a server name otherwise no one will be able to reach you" .Values.server_name | quote }}
+            - name: CONDUWUIT_DATABASE_PATH
+              value: "/data/db"
+            - name: CONDUWUIT_PORT
+              value: "80"
+            - name: CONDUWUIT_ADDRESS
+              value: "0.0.0.0"
+            - name: CONDUWUIT_ROCKSDB_PARALLELISM_THREADS
+              value: {{ $threads | quote }}
+            - name: RUST_LOG
+              value: info
+            {{- range .Values.extraEnv }}
+            - name: {{ .name | quote }}
+              value: {{ .value | quote }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /_matrix/federation/v1/version
+              port: http
+            periodSeconds: 2
+            failureThreshold: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      nodeSelector:
+        {{- toYaml .Values.nodeSelector | nindent 8 }}
+      affinity:
+        {{- toYaml .Values.affinity | nindent 8 }}
+      tolerations:
+        {{- toYaml .Values.tolerations | nindent 8 }}
+      volumes:
+        - name: data
+          {{- if .Values.persistence.data.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.data.existingClaim | default (printf "%s-%s" (include "tuwunel.fullname" .) "data") }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: config
+          configMap:
+            name: {{ template "tuwunel.fullname" . }}-configmap
