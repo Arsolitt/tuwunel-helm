@@ -83,6 +83,134 @@ helm install --name my-release -f values.yaml oci://ghcr.io/magikid/modern-condu
 
 Read through the [values.yaml](values.yaml) file.
 
+## Matrix RTC (Element Call) Configuration
+
+This chart optionally supports Matrix RTC via LiveKit for Element Call functionality. This enables audio/video calling features in Element Web and other Matrix clients.
+
+### Prerequisites
+
+1. **Create Kubernetes secret with LiveKit credentials:**
+
+```bash
+# Generate random credentials
+LIVEKIT_KEY=$(openssl rand -hex 10)
+LIVEKIT_SECRET=$(openssl rand -hex 32)
+
+# Create secret
+kubectl create secret generic livekit-secrets \
+  --from-literal=LIVEKIT_KEY=$LIVEKIT_KEY \
+  --from-literal=LIVEKIT_SECRET=$LIVEKIT_SECRET
+```
+
+2. **Configure DNS for RTC domain:**
+   - Point `matrix-rtc.yourdomain.com` to your cluster's LoadBalancer IP
+   - Or use your cloud provider's DNS solution
+
+### Basic Configuration
+
+Add the following to your `values.yaml`:
+
+```yaml
+# Enable Matrix RTC
+rtc:
+  enabled: true
+  domain: "matrix-rtc.yourdomain.com"
+  
+  # JWT service (handles authentication)
+  jwt:
+    envFromSecret:
+      LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
+      LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
+      LIVEKIT_URL: "wss://matrix-rtc.yourdomain.com"
+      LIVEKIT_FULL_ACCESS_HOMESERVERS: "yourdomain.com"
+  
+  # LiveKit media server
+  livekit:
+    envFromSecret:
+      LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
+      LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
+    config:
+      keys:
+        "${LIVEKIT_KEY}": "${LIVEKIT_SECRET}"
+  
+  # Ingress for RTC services
+  ingress:
+    enabled: true
+    class: nginx
+    tls: true
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+# Configure well-known for RTC discovery
+config:
+  global:
+    well_known:
+      rtc_transports:
+        - type: livekit
+          livekit_service_url: "https://matrix-rtc.yourdomain.com"
+```
+
+### Network Modes
+
+**LoadBalancer (default):**
+- Uses Kubernetes LoadBalancer service
+- Preserves client source IP with `externalTrafficPolicy: Local`
+- Requires cloud provider LoadBalancer support
+- Recommended for most deployments
+
+**hostNetwork:**
+- Pod uses host network namespace
+- Direct access to host ports
+- Required for some bare-metal setups
+- Set with `rtc.livekit.networkMode: "hostNetwork"`
+
+### Port Configuration
+
+For LoadBalancer mode, ensure your cloud provider allows the following ports:
+- `7880/tcp` - HTTP API
+- `7881/tcp` - RTC TCP
+- `50100-50200/udp` - RTC UDP range (media streams)
+
+For hostNetwork mode, ensure firewall allows these ports on the node.
+
+### Deployment
+
+```bash
+# Install with RTC enabled
+helm install matrix oci://ghcr.io/magikid/modern-conduwuit-helm/conduwuit \
+  -f values.yaml \
+  --set server_name=yourdomain.com
+```
+
+### Troubleshooting
+
+1. **Check pods are running:**
+   ```bash
+   kubectl get pods -l app.kubernetes.io/name=conduwuit
+   ```
+
+2. **Check LoadBalancer IP:**
+   ```bash
+   kubectl get svc -l app.kubernetes.io/component=rtc-livekit
+   ```
+
+3. **Test well-known:**
+   ```bash
+   curl https://yourdomain.com/.well-known/matrix/client
+   ```
+
+4. **Check logs:**
+   ```bash
+   kubectl logs -l app.kubernetes.io/component=rtc-jwt
+   kubectl logs -l app.kubernetes.io/component=rtc-livekit
+   ```
+
+### Additional Resources
+
+- [LiveKit Documentation](https://docs.livekit.io/)
+- [Matrix RTC Specification](https://github.com/matrix-org/matrix-spec-proposals/pull/4143)
+- [Element Call](https://call.element.io/)
+
 [docker]: https://ghcr.io/matrix-construct/tuwunel:latest
 [github]: https://github.com/matrix-construct/tuwunel
 [tuwunel-homepage]: https://tuwunel.chat/
