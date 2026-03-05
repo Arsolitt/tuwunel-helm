@@ -1,0 +1,52 @@
+{{- if and .Values.rtc.enabled .Values.rtc.ingress.enabled -}}
+{{- $fullName := include "tuwunel.fullname" . -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullName }}-rtc
+  labels:
+    {{- include "tuwunel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rtc-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/websocket-services: {{ $fullName }}-livekit
+    {{- with .Values.rtc.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- if .Values.rtc.ingress.class }}
+  ingressClassName: {{ .Values.rtc.ingress.class | quote }}
+  {{- end }}
+  {{- if .Values.rtc.ingress.tls }}
+  tls:
+    - hosts:
+        - {{ .Values.rtc.domain }}
+      secretName: {{ .Values.rtc.ingress.tlsSecretName | default (printf "%s-rtc-tls" $fullName) }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.rtc.domain }}
+      http:
+        paths:
+          - path: /sfu/get
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullName }}-jwt
+                port:
+                  number: 8081
+          - path: /healthz
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullName }}-jwt
+                port:
+                  number: 8081
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullName }}-livekit
+                port:
+                  number: {{ .Values.rtc.livekit.config.port }}
+{{- end }}

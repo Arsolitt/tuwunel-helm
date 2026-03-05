@@ -1,0 +1,19 @@
+{{- if .Values.rtc.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tuwunel.fullname" . }}-jwt
+  labels:
+    {{- include "tuwunel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rtc-jwt
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "tuwunel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rtc-jwt
+{{- end }}

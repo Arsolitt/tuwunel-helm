@@ -1,0 +1,71 @@
+{{- if .Values.rtc.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tuwunel.fullname" . }}-livekit
+  labels:
+    {{- include "tuwunel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rtc-livekit
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "tuwunel.labels" . | nindent 6 }}
+      app.kubernetes.io/component: rtc-livekit
+  template:
+    metadata:
+      labels:
+        {{- include "tuwunel.labels" . | nindent 8 }}
+        app.kubernetes.io/component: rtc-livekit
+    spec:
+      {{- if eq .Values.rtc.livekit.networkMode "hostNetwork" }}
+      hostNetwork: true
+      {{- end }}
+      initContainers:
+        - name: config-processor
+          image: "{{ .Values.initContainer.image.repository }}:{{ .Values.initContainer.image.tag }}"
+          imagePullPolicy: {{ .Values.initContainer.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - envsubst < /config-template/livekit.yaml > /config/livekit.yaml
+          env:
+            {{- range $key, $val := .Values.rtc.livekit.envFromSecret }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ (split "/" $val)._0 }}
+                  key: {{ (split "/" $val)._1 }}
+            {{- end }}
+          volumeMounts:
+            - name: config-template
+              mountPath: /config-template
+            - name: config
+              mountPath: /config
+      containers:
+        - name: livekit
+          image: "{{ .Values.rtc.livekit.image.repository }}:{{ .Values.rtc.livekit.image.tag }}"
+          imagePullPolicy: {{ .Values.rtc.livekit.image.pullPolicy }}
+          command: ["livekit-server"]
+          args: ["--config", "/config/livekit.yaml"]
+          ports:
+            - name: http
+              containerPort: {{ .Values.rtc.livekit.config.port }}
+            - name: rtc-tcp
+              containerPort: {{ .Values.rtc.livekit.config.rtc.tcp_port }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+      volumes:
+        - name: config-template
+          configMap:
+            name: {{ include "tuwunel.fullname" . }}-livekit
+        - name: config
+          emptyDir: {}
+{{- end }}

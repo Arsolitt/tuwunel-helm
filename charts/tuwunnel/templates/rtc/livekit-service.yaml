@@ -1,0 +1,33 @@
+{{- if and .Values.rtc.enabled (eq .Values.rtc.livekit.networkMode "loadBalancer") -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tuwunel.fullname" . }}-livekit
+  labels:
+    {{- include "tuwunel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rtc-livekit
+  annotations:
+    {{- with .Values.rtc.livekit.service.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ .Values.rtc.livekit.service.type }}
+  {{- if .Values.rtc.livekit.service.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ .Values.rtc.livekit.service.externalTrafficPolicy }}
+  {{- end }}
+  {{- if .Values.rtc.livekit.service.loadBalancerIP }}
+  loadBalancerIP: {{ .Values.rtc.livekit.service.loadBalancerIP }}
+  {{- end }}
+  ports:
+    - name: http
+      port: {{ .Values.rtc.livekit.config.port }}
+      targetPort: http
+      protocol: TCP
+    - name: rtc-tcp
+      port: {{ .Values.rtc.livekit.config.rtc.tcp_port }}
+      targetPort: rtc-tcp
+      protocol: TCP
+  selector:
+    {{- include "tuwunel.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: rtc-livekit
+{{- end }}
