@@ -1,7 +1,7 @@
 ## This is where people will reach you at.  If you set this to
 ## example.com, your usernames will look like steve:example.com.
 ## You probably want this to be your apex domain.
-server_name: ""
+server_name: "yourdomain.com"
 
 ## Example full RTC configuration (for quick reference)
 ## Uncomment and modify as needed:
@@ -241,25 +241,20 @@ rtc:
     envFromSecret: {}
     
     ## Network mode for LiveKit pods
-    ## Options:
-    ##   - "loadBalancer": Uses Kubernetes LoadBalancer service (recommended)
-    ##     Preserves client source IP with externalTrafficPolicy: Local
-    ##     Requires cloud provider LoadBalancer support
-    ##   - "hostNetwork": Pod uses host network namespace
-    ##     Direct access to host ports
-    ##     Required for some bare-metal setups
-    networkMode: "loadBalancer"
+    ## Currently only hostNetwork is supported
+    ## Pod uses host network namespace for direct access to host ports
+    ## Required for WebRTC connections
+    networkMode: "hostNetwork"
     
-    ## Service configuration (only used when networkMode is "loadBalancer")
-    service:
-      type: LoadBalancer
-      ## Preserves client source IP address
-      ## Required for proper WebRTC connection establishment
-      externalTrafficPolicy: Local
-      ## Optional: Static LoadBalancer IP (cloud-specific)
-      # loadBalancerIP: ""
-      ## Optional: Additional service annotations
-      # annotations: {}
+    ## TODO: Implement LoadBalancer support for cloud deployments
+    ## This will allow using Kubernetes LoadBalancer service instead of hostNetwork
+    ## Benefits:
+    ##   - Preserves client source IP with externalTrafficPolicy: Local
+    ##   - Better cloud integration
+    ##   - No need for host network access
+    ## Requirements:
+    ##   - Cloud provider LoadBalancer support
+    ##   - Proper port configuration for UDP range
     
     ## LiveKit server configuration
     ## This is converted to livekit.yaml and processed with envsubst

@@ -7,10 +7,8 @@ metadata:
     {{- include "tuwunel.labels" . | nindent 4 }}
     app.kubernetes.io/component: rtc-livekit
 spec:
-  {{- if eq .Values.rtc.livekit.networkMode "hostNetwork" }}
   strategy:
     type: Recreate
-  {{- end }}
   replicas: 1
   selector:
     matchLabels:
@@ -22,9 +20,7 @@ spec:
         {{- include "tuwunel.labels" . | nindent 8 }}
         app.kubernetes.io/component: rtc-livekit
     spec:
-      {{- if eq .Values.rtc.livekit.networkMode "hostNetwork" }}
       hostNetwork: true
-      {{- end }}
       initContainers:
         - name: config-processor
           image: "{{ .Values.initContainer.image.repository }}:{{ .Values.initContainer.image.tag }}"
@@ -66,13 +62,13 @@ spec:
               containerPort: {{ .Values.rtc.livekit.config.port }}
             - name: rtc-tcp
               containerPort: {{ .Values.rtc.livekit.config.rtc.tcp_port }}
-            {{- $start := int .Values.rtc.livekit.config.rtc.port_range_start }}
-            {{- $end := int .Values.rtc.livekit.config.rtc.port_range_end }}
-            {{- range $i := until (int (sub $end $start)) }}
-            - name: rtc-udp-{{ add $start $i }}
-              containerPort: {{ add $start $i }}
-              protocol: UDP
-            {{- end }}
+            # {{- $start := int .Values.rtc.livekit.config.rtc.port_range_start }}
+            # {{- $end := int .Values.rtc.livekit.config.rtc.port_range_end }}
+            # {{- range $i := until (int (sub $end $start)) }}
+            # - name: rtc-udp-{{ add $start $i }}
+            #   containerPort: {{ add $start $i }}
+            #   protocol: UDP
+            # {{- end }}
           volumeMounts:
             - name: config
               mountPath: /config

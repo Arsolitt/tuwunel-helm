@@ -164,26 +164,24 @@ config:
 
 ### Network Modes
 
-**LoadBalancer (default):**
-- Uses Kubernetes LoadBalancer service
-- Preserves client source IP with `externalTrafficPolicy: Local`
-- Requires cloud provider LoadBalancer support
-- Recommended for most deployments
-
-**hostNetwork:**
+**hostNetwork (current):**
 - Pod uses host network namespace
 - Direct access to host ports
-- Required for some bare-metal setups
-- Set with `rtc.livekit.networkMode: "hostNetwork"`
+- Required for WebRTC connections
+- Ensure firewall allows ports 7880, 7881, and 50100-50200
+
+**LoadBalancer (TODO):**
+- Will use Kubernetes LoadBalancer service
+- Will preserve client source IP with `externalTrafficPolicy: Local`
+- Will require cloud provider LoadBalancer support
+- Not yet implemented
 
 ### Port Configuration
 
-For LoadBalancer mode, ensure your cloud provider allows the following ports:
+Ensure firewall allows the following ports on the node:
 - `7880/tcp` - HTTP API
 - `7881/tcp` - RTC TCP
 - `50100-50200/udp` - RTC UDP range (media streams)
-
-For hostNetwork mode, ensure firewall allows these ports on the node.
 
 ### Deployment
 
@@ -232,6 +230,7 @@ image:
 - [ ] S3 backup support
 - [ ] Backup restoration instructions
 - [ ] Gateway API support
+- [ ] LoadBalancer support for LiveKit (currently only hostNetwork is available)
 
 ## License
 
