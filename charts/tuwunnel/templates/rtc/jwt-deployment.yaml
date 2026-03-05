@@ -1,0 +1,43 @@
+{{- if .Values.rtc.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tuwunel.fullname" . }}-jwt
+  labels:
+    {{- include "tuwunel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rtc-jwt
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "tuwunel.labels" . | nindent 6 }}
+      app.kubernetes.io/component: rtc-jwt
+  template:
+    metadata:
+      labels:
+        {{- include "tuwunel.labels" . | nindent 8 }}
+        app.kubernetes.io/component: rtc-jwt
+    spec:
+      containers:
+        - name: jwt-service
+          image: "{{ .Values.rtc.jwt.image.repository }}:{{ .Values.rtc.jwt.image.tag }}"
+          imagePullPolicy: {{ .Values.rtc.jwt.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8081
+          env:
+            {{- range $key, $val := .Values.rtc.jwt.envFromSecret }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ (split "/" $val)._0 }}
+                  key: {{ (split "/" $val)._1 }}
+            {{- end }}
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+{{- end }}
