@@ -7,6 +7,10 @@ metadata:
     {{- include "tuwunel.labels" . | nindent 4 }}
     app.kubernetes.io/component: rtc-livekit
 spec:
+  {{- if eq .Values.rtc.livekit.networkMode "hostNetwork" }}
+  strategy:
+    type: Recreate
+  {{- end }}
   replicas: 1
   selector:
     matchLabels:
@@ -56,7 +60,6 @@ spec:
         - name: livekit
           image: "{{ .Values.rtc.livekit.image.repository }}:{{ .Values.rtc.livekit.image.tag }}"
           imagePullPolicy: {{ .Values.rtc.livekit.image.pullPolicy }}
-          command: ["livekit-server"]
           args: ["--config", "/config/livekit.yaml"]
           ports:
             - name: http

@@ -26,6 +26,8 @@ server_name: ""
 #     enabled: true
 #     class: nginx
 #     tls: true
+#     # TLS secret name (defaults to <release-name>-rtc-tls if not specified)
+#     tlsSecretName: ""
 # 
 # ## Then add to config.global.well_known:
 # config:
@@ -43,8 +45,8 @@ image:
 ## Init container for envsubst
 initContainer:
   image:
-    repository: busybox
-    tag: latest
+    repository: dibi/envsubst
+    tag: "1"
     pullPolicy: IfNotPresent
 
 ## The keys under config must be valid for the configuration file of
@@ -152,10 +154,10 @@ persistence:
 
 resources:
   requests:
-    cpu: "1"
-    memory: "256Mi"
+    cpu: "50m"
+    memory: "128Mi"
   limits:
-    cpu: "2"
+    cpu: "1"
     memory: "512Mi"
 
 nodeSelector: {}
