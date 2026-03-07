@@ -49,18 +49,18 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - envsubst < /config-template/config.toml > /config/config.toml
-          {{- if or (.Values.config.global.env) (.Values.config.global.envRaw) (.Values.config.global.envFromSecret) }}
+          {{- if or (.Values.env) (.Values.envRaw) (.Values.envFromSecret) }}
           env:
-          {{- range $key, $val := .Values.config.global.env }}
+          {{- range $key, $val := .Values.env }}
             - name: {{ $key }}
               value: {{ $val | quote }}
           {{- end }}
-          {{- if .Values.config.global.envRaw }}
-            {{- with .Values.config.global.envRaw }}
+          {{- if .Values.envRaw }}
+            {{- with .Values.envRaw }}
               {{- toYaml . | nindent 12 }}
             {{- end }}
           {{- end }}
-          {{- range $key, $val := .Values.config.global.envFromSecret }}
+          {{- range $key, $val := .Values.envFromSecret }}
             - name: {{ $key }}
               valueFrom:
                 secretKeyRef:

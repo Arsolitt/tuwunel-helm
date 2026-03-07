@@ -52,6 +52,16 @@ initContainer:
 ## The keys under config must be valid for the configuration file of
 ## Conduwuit, Tuwunel, or Continuwuity as this section is converted into
 ## the configuration file
+## Plain text environment variables for envsubst
+env: {}
+
+## Raw environment variable sections (for complex configurations)
+envRaw: []
+
+## Environment variables from Kubernetes secrets
+## Format: VARIABLE_NAME: secret-name/key-name
+envFromSecret: {}
+
 config:
   global:
     allow_registration: "true"
@@ -59,16 +69,6 @@ config:
     allow_federation: "false"
     trusted_servers: []
     tls: {}
-    
-    ## Plain text environment variables
-    env: {}
-    
-    ## Raw environment variable sections (for complex configurations)
-    envRaw: []
-    
-    ## Environment variables from Kubernetes secrets
-    ## Format: VARIABLE_NAME: secret-name/key-name
-    envFromSecret: {}
     
     ## Well-known configuration
     ## Used for Matrix server discovery and RTC services
