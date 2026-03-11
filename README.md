@@ -52,7 +52,7 @@ The following tables lists the configurable parameters of the tuwunel chart and 
 | Parameter                          | Description                                                                                 | Default                            |
 | ---------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------- |
 | `image.repository`                 | Image repository                                                                            | `ghcr.io/matrix-construct/tuwunel`        |
-| `image.tag`                        | Image tag                                                                                   | `v1.5.0`                           |
+| `image.tag`                        | Image tag                                                                                   | `v1.5.1`                           |
 | `image.pullPolicy`                 | Image pull policy                                                                           | `IfNotPresent`                     |
 | `config.server_name`               | Server name                                                                                 | `your.server.name`                 |
 | `config.max_request_size`          | Maximum upload size                                                                         | `20000000` (20MB)                  |

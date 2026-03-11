@@ -230,7 +230,7 @@ rtc:
   livekit:
     image:
       repository: livekit/livekit-server
-      tag: v1.9.11
+      tag: v1.9.12
       pullPolicy: IfNotPresent
     
     resources:
