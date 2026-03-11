@@ -21,13 +21,16 @@ spec:
         app.kubernetes.io/component: rtc-livekit
     spec:
       hostNetwork: true
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         - name: config-processor
           image: "{{ .Values.initContainer.image.repository }}:{{ .Values.initContainer.image.tag }}"
           imagePullPolicy: {{ .Values.initContainer.image.pullPolicy }}
           command: ["/bin/sh", "-c"]
           args:
-            - envsubst < /config-template/livekit.yaml > /config/livekit.yaml
+            - envsubst < /tmp/config-template/livekit.yaml > /tmp/config/livekit.yaml
           {{- if or (.Values.rtc.livekit.env) (.Values.rtc.livekit.envRaw) (.Values.rtc.livekit.envFromSecret) }}
           env:
           {{- range $key, $val := .Values.rtc.livekit.env }}
@@ -49,40 +52,46 @@ spec:
           {{- end }}
           volumeMounts:
             - name: config-template
-              mountPath: /config-template
+              mountPath: /tmp/config-template
             - name: config
-              mountPath: /config
+              mountPath: /tmp/config
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
       containers:
         - name: livekit
           image: "{{ .Values.rtc.livekit.image.repository }}:{{ .Values.rtc.livekit.image.tag }}"
           imagePullPolicy: {{ .Values.rtc.livekit.image.pullPolicy }}
-          args: ["--config", "/config/livekit.yaml"]
+          args: ["--config", "/tmp/config/livekit.yaml"]
           ports:
             - name: http
               containerPort: {{ .Values.rtc.livekit.config.port }}
             - name: rtc-tcp
               containerPort: {{ .Values.rtc.livekit.config.rtc.tcp_port }}
-            # {{- $start := int .Values.rtc.livekit.config.rtc.port_range_start }}
-            # {{- $end := int .Values.rtc.livekit.config.rtc.port_range_end }}
-            # {{- range $i := until (int (sub $end $start)) }}
-            # - name: rtc-udp-{{ add $start $i }}
-            #   containerPort: {{ add $start $i }}
-            #   protocol: UDP
-            # {{- end }}
           volumeMounts:
             - name: config
-              mountPath: /config
+              mountPath: /tmp/config
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           resources:
-            requests:
-              cpu: 500m
-              memory: 512Mi
-            limits:
-              cpu: 1000m
-              memory: 1Gi
+            {{- toYaml .Values.rtc.livekit.resources | nindent 12 }}
       volumes:
         - name: config-template
           configMap:
             name: {{ include "tuwunel.fullname" . }}-livekit
         - name: config
+          emptyDir: {}
+        - name: tmp
           emptyDir: {}
 {{- end }}

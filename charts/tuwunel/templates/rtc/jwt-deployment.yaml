@@ -18,6 +18,12 @@ spec:
         {{- include "tuwunel.labels" . | nindent 8 }}
         app.kubernetes.io/component: rtc-jwt
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: jwt-service
           image: "{{ .Values.rtc.jwt.image.repository }}:{{ .Values.rtc.jwt.image.tag }}"
@@ -44,11 +50,18 @@ spec:
                   key: {{ (split "/" $val)._1 }}
           {{- end }}
           {{- end }}
+          volumeMounts:
+            - mountPath: /tmp
+              name: tmp
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           resources:
-            requests:
-              cpu: 100m
-              memory: 128Mi
-            limits:
-              cpu: 200m
-              memory: 256Mi
+            {{- toYaml .Values.rtc.jwt.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
 {{- end }}
