@@ -39,7 +39,7 @@ server_name: "yourdomain.com"
 
 image:
   repository: ghcr.io/matrix-construct/tuwunel
-  tag: v1.5.0
+  tag: v1.5.1
   pullPolicy: IfNotPresent
 
 ## Init container for envsubst
