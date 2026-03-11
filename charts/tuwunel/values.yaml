@@ -110,7 +110,7 @@ service:
   type: ClusterIP
   clusterIP: "None"
 
-  port: 80
+  port: 8080
   ## List of IP addresses at which the service is available
   ## Ref: https://kubernetes.io/docs/user-guide/services/#external-ips
   ##
@@ -232,6 +232,14 @@ rtc:
       repository: livekit/livekit-server
       tag: v1.9.11
       pullPolicy: IfNotPresent
+    
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 1
+        memory: 1Gi
     
     ## Plain text environment variables
     env: {}
