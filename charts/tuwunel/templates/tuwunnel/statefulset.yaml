@@ -123,6 +123,7 @@ spec:
             {{- end }}
           readinessProbe:
             httpGet:
+              host: 0.0.0.0
               path: /_matrix/federation/v1/version
               port: http
             periodSeconds: 2
