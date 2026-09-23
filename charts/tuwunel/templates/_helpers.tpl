@@ -46,8 +46,6 @@ app.kubernetes.io/name: {{ template "tuwunel.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 helm.sh/chart: {{ template "tuwunel.chart" . }}
-{{- if .Values.extraLabels -}}
-{{- toYaml .Values.extraLabels -}}
-{{- end -}}
+{{ with .Values.extraLabels }}{{ toYaml . }}{{ end }}
 {{- end -}}
 
