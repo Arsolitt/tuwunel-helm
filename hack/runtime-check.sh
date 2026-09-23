@@ -86,7 +86,7 @@ for values in "$chart_dir"/ci/*-values.yaml; do
   host_port=$(free_port $((18080 + index - 1)))
   work="${RUNNER_TEMP:-/tmp}/tuwunel-runtime-${run_id}-${index}"
   rm -rf "$work"
-  mkdir -p "$work/data"
+  mkdir -p "$work"
 
   group "runtime check: $values"
 
@@ -131,9 +131,14 @@ PY
   port=$(cat "$work/port")
   path=$(cat "$work/path")
 
+  # The database directory is a tmpfs, not a bind mount: the container writes
+  # its RocksDB as its own uid, and on a Linux host (the CI runner) the runner
+  # user then cannot delete those files again, so a bind-mounted scratch dir
+  # leaves the cleanup failing with "Permission denied" - a failure that macOS
+  # bind mounts hide. Nothing has to persist between fixtures anyway.
   docker run -d --name "$container" \
     -v "$work/config.toml:/tmp/config/config.toml:ro" \
-    -v "$work/data:/data" \
+    --tmpfs "/data:rw,mode=1777,size=512m" \
     --env-file "$work/env.list" \
     -p "127.0.0.1:${host_port}:${port}" "$image" >/dev/null
 
