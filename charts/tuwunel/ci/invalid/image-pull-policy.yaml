@@ -1,0 +1,6 @@
+# MUST be rejected: Sometimes is not a valid imagePullPolicy; Kubernetes would
+# reject the manifest with a confusing error further down the line.
+server_name: matrix.ci.example
+
+image:
+  pullPolicy: Sometimes

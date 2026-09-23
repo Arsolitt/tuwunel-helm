@@ -1,0 +1,6 @@
+# MUST be rejected: 'ingres' is a typo for 'ingress'. Unknown top-level keys are
+# the main failure mode the schema catches, because Helm silently ignores them.
+server_name: matrix.ci.example
+
+ingres:
+  enabled: true

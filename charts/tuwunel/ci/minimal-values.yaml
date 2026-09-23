@@ -1,0 +1,14 @@
+# Scenario: smallest supported install.
+#
+# Rendered by the `lint` CI job and validated with kubeconform: no Ingress, no
+# RTC, no persistent volume (emptyDir is used instead of a PVC).
+server_name: matrix.ci.example
+
+persistence:
+  data:
+    enabled: false
+
+config:
+  global:
+    allow_registration: "false"
+    allow_federation: "false"

@@ -1,0 +1,6 @@
+# MUST be rejected: extraEnv entries need both name and value, otherwise the
+# container env renders '<no value>'.
+server_name: matrix.ci.example
+
+extraEnv:
+  - name: LIVEKIT_KEY

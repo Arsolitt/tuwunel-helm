@@ -1,0 +1,7 @@
+# MUST be rejected: ReadWriteManyy is not a valid access mode (typo trap).
+server_name: matrix.ci.example
+
+persistence:
+  data:
+    enabled: true
+    accessMode: ReadWriteManyy

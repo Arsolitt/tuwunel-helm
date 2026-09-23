@@ -1,0 +1,88 @@
+# Scenario: values that already worked before values.schema.json existed and
+# must keep working afterwards.
+#
+# Guards the schema against over-restriction: numeric and string CPU quantities,
+# a quoted service port, a numeric init-container tag, extra/untyped env values,
+# scheduling knobs and labels/annotations.
+nameOverride: tuwunel-ci
+
+server_name: matrix.ci.example
+
+image:
+  tag: "v1.5.1"
+
+initContainer:
+  image:
+    tag: 1
+
+service:
+  type: LoadBalancer
+  clusterIP: 10.43.0.10
+  port: "8080"
+  annotations:
+    ci.example/managed: "true"
+  externalIPs:
+    - 203.0.113.10
+  loadBalancerIP: 203.0.113.11
+  loadBalancerSourceRanges:
+    - 203.0.113.0/24
+
+ingress:
+  enabled: true
+  class: nginx
+
+extraLabels:
+  ci.example/owner: tuwunel
+statefulsetAnnotations:
+  ci.example/note: rendered
+
+env:
+  RUST_LOG: debug
+  CONDUWUIT_ALLOW_REGISTRATION: false
+
+extraEnv:
+  - name: CI_MARKER
+    value: "1"
+  - name: CI_NUMERIC_MARKER
+    value: 2
+
+envFromSecret:
+  CI_TOKEN: ci-secrets/token
+
+config:
+  global:
+    allow_registration: "false"
+
+nodeSelector:
+  ci.example/pool: general
+
+tolerations:
+  - key: ci.example/dedicated
+    operator: Equal
+    value: tuwunel
+    effect: NoSchedule
+
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: ci.example/pool
+              operator: In
+              values:
+                - general
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: 2
+    memory: 1Gi
+    ephemeral-storage: 1Gi
+
+persistence:
+  data:
+    storageClass: ci-standard
+    size: 8Gi
+    accessMode: ReadWriteOnce

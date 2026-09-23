@@ -2,6 +2,10 @@
 
 Helm chart for deploying [Tuwunel](https://github.com/matrix-construct/tuwunel) - a Matrix homeserver based on Conduit.
 
+Values are validated against [`values.schema.json`](values.schema.json): unknown top-level keys
+and impossible values are rejected by `helm lint`, `helm template` and `helm install` instead of
+being silently ignored.
+
 ## Configuration
 
 The following tables list the configurable parameters of the tuwunel chart and their default values.

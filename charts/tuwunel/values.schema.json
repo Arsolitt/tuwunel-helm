@@ -1,0 +1,379 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "tuwunel chart values",
+  "description": "Validated against the tuwunel chart templates. Keys where the chart accepts several representations (CPU/memory quantities, service ports) intentionally accept both forms; keys the templates interpolate verbatim are restricted to what renders into a valid manifest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "server_name",
+    "image",
+    "config",
+    "service",
+    "ingress",
+    "persistence",
+    "resources",
+    "rtc"
+  ],
+  "definitions": {
+    "quantity": {
+      "description": "Kubernetes resource quantity: a number or a string with an optional suffix (m, Mi, Gi, ...).",
+      "anyOf": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?([eE][+-]?[0-9]+)?(n|u|m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"
+        }
+      ]
+    },
+    "stringMap": {
+      "description": "String-to-string map, as required by Kubernetes labels and annotations.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "scalarMap": {
+      "description": "String-to-scalar map; values are quoted into environment variables.",
+      "type": "object",
+      "additionalProperties": {
+        "type": ["string", "number", "boolean"]
+      }
+    },
+    "secretEnvMap": {
+      "description": "Environment variables sourced from Secrets. Values must be '<secret-name>/<key>'; the chart splits on '/' and fails at render time otherwise.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[^/]+/[^/]+$"
+      }
+    },
+    "envVarList": {
+      "description": "Raw Kubernetes env entries passed through with toYaml.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": true,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "imageSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "tag"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": ["string", "number"],
+          "description": "Rendered verbatim after the ':' separator; the main tuwunel image tag additionally goes through tpl()."
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        }
+      }
+    },
+    "resourcesSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requests", "limits"],
+      "properties": {
+        "requests": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/quantity"
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/quantity"
+          }
+        }
+      }
+    },
+    "ingressSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "class": {
+          "type": "string"
+        },
+        "annotations": {
+          "$ref": "#/definitions/stringMap"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "extraHosts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "tls": {
+          "type": "boolean"
+        },
+        "tlsSecretName": {
+          "type": "string"
+        }
+      }
+    },
+    "rtcSidecarSpec": {
+      "description": "Shape shared by the RTC JWT service and the LiveKit server.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "$ref": "#/definitions/imageSpec"
+        },
+        "resources": {
+          "$ref": "#/definitions/resourcesSpec"
+        },
+        "env": {
+          "$ref": "#/definitions/scalarMap"
+        },
+        "envRaw": {
+          "$ref": "#/definitions/envVarList"
+        },
+        "envFromSecret": {
+          "$ref": "#/definitions/secretEnvMap"
+        }
+      }
+    }
+  },
+  "properties": {
+    "nameOverride": {
+      "type": "string"
+    },
+    "fullnameOverride": {
+      "type": "string"
+    },
+    "server_name": {
+      "description": "Matrix server name (the domain part of every user ID).",
+      "type": "string",
+      "minLength": 1
+    },
+    "image": {
+      "description": "Main tuwunel image. Its tag is rendered through tpl(), so it may reference other values.",
+      "$ref": "#/definitions/imageSpec"
+    },
+    "initContainer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image"],
+      "properties": {
+        "image": {
+          "$ref": "#/definitions/imageSpec"
+        }
+      }
+    },
+    "env": {
+      "$ref": "#/definitions/scalarMap"
+    },
+    "envRaw": {
+      "$ref": "#/definitions/envVarList"
+    },
+    "envFromSecret": {
+      "$ref": "#/definitions/secretEnvMap"
+    },
+    "config": {
+      "description": "Rendered verbatim into config.toml, so any tuwunel/Conduit configuration key is accepted here.",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "extraEnv": {
+      "description": "Additional environment variables for the tuwunel container; both name and value are required.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "value"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "value": {
+            "type": ["string", "number", "boolean"]
+          }
+        }
+      }
+    },
+    "extraLabels": {
+      "$ref": "#/definitions/stringMap"
+    },
+    "statefulsetAnnotations": {
+      "$ref": "#/definitions/stringMap"
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["port"],
+      "properties": {
+        "annotations": {
+          "$ref": "#/definitions/stringMap"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["ClusterIP", "NodePort", "LoadBalancer", "ExternalName"]
+        },
+        "clusterIP": {
+          "description": "Defaults to 'None' (headless service required by the StatefulSet).",
+          "type": "string"
+        },
+        "port": {
+          "description": "Rendered verbatim into the Service, the Ingress backend and the StatefulSet; both 8080 and \"8080\" are accepted.",
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            {
+              "type": "string",
+              "pattern": "^[0-9]{1,5}$"
+            }
+          ]
+        },
+        "externalIPs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "loadBalancerIP": {
+          "type": "string"
+        },
+        "loadBalancerSourceRanges": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "ingress": {
+      "$ref": "#/definitions/ingressSpec"
+    },
+    "persistence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["data"],
+      "properties": {
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled"],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "existingClaim": {
+              "type": "string"
+            },
+            "storageClass": {
+              "type": "string"
+            },
+            "accessMode": {
+              "type": "string",
+              "enum": ["ReadWriteOnce", "ReadOnlyMany", "ReadWriteMany", "ReadWriteOncePod"]
+            },
+            "size": {
+              "description": "PVC storage request, quoted into the manifest; a unit suffix is expected.",
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]+)?([eE][+-]?[0-9]+)?(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"
+            }
+          }
+        }
+      }
+    },
+    "resources": {
+      "$ref": "#/definitions/resourcesSpec"
+    },
+    "nodeSelector": {
+      "$ref": "#/definitions/stringMap"
+    },
+    "tolerations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "affinity": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "rtc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "domain": {
+          "type": "string"
+        },
+        "ingress": {
+          "$ref": "#/definitions/ingressSpec"
+        },
+        "jwt": {
+          "$ref": "#/definitions/rtcSidecarSpec"
+        },
+        "livekit": {
+          "description": "LiveKit media server. Shares the sidecar shape with rtc.jwt plus LiveKit-specific settings.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "image": {
+              "$ref": "#/definitions/imageSpec"
+            },
+            "resources": {
+              "$ref": "#/definitions/resourcesSpec"
+            },
+            "env": {
+              "$ref": "#/definitions/scalarMap"
+            },
+            "envRaw": {
+              "$ref": "#/definitions/envVarList"
+            },
+            "envFromSecret": {
+              "$ref": "#/definitions/secretEnvMap"
+            },
+            "networkMode": {
+              "description": "Only hostNetwork is implemented; the deployment template always sets hostNetwork: true.",
+              "type": "string",
+              "enum": ["hostNetwork"]
+            },
+            "config": {
+              "description": "Rendered verbatim into livekit.yaml; any LiveKit configuration key is accepted here.",
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      }
+    }
+  }
+}

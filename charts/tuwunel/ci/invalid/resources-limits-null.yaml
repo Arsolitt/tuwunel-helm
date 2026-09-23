@@ -1,0 +1,6 @@
+# MUST be rejected: the StatefulSet template dereferences resources.limits.cpu,
+# so dropping limits is a hard render error - the schema reports it instead.
+server_name: matrix.ci.example
+
+resources:
+  limits: null

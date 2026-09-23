@@ -1,0 +1,26 @@
+# Scenario: federating deployment behind an Ingress with a delegated domain.
+#
+# Exercises the ingress delegated-domain branch (config.global.well_known.server
+# is set, so the template adds the /.well-known/matrix and /_matrix paths),
+# TLS, extra hosts and federation settings.
+server_name: matrix.ci.example
+
+ingress:
+  enabled: true
+  class: nginx
+  path: /
+  tls: true
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+  extraHosts:
+    - alias.ci.example
+
+config:
+  global:
+    allow_federation: "true"
+    trusted_servers:
+      - matrix.org
+    well_known:
+      client: https://matrix.ci.example
+      server: matrix.ci.example:443
