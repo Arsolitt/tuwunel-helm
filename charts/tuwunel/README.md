@@ -45,6 +45,7 @@ The `config` section is converted directly into the tuwunel configuration file. 
 
 | Parameter                                   | Description                                                                                 | Default                  |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------ |
+| `config.global.address`                     | Address tuwunel listens on; `::` is a dual-stack socket, `0.0.0.0` is IPv4 only             | `::`                     |
 | `config.global.allow_registration`          | Whether to allow users to register new accounts                                             | `true`                   |
 | `config.global.registration_token`          | Token required for registration                                                             | `supa-dupa-secret-token` |
 | `config.global.allow_federation`            | Whether to allow federating with other Matrix servers                                       | `false`                  |
@@ -56,6 +57,39 @@ The `config` section is converted directly into the tuwunel configuration file. 
 | `config.global.blurhashing`                 | Blurhash configuration                                                                      | `{}`                     |
 | `config.global.ldap`                        | LDAP configuration                                                                          | `{}`                     |
 | `config.global.antispam`                    | Antispam configuration (meowlnir, draupnir)                                                 | `{}`                     |
+
+Booleans have to be TOML booleans, not strings: `allow_federation: "false"` renders
+`allow_federation = "false"` into `config.toml` and tuwunel exits 1 at startup with
+`invalid type: found string "false", expected a boolean for key "global.allow_federation"`.
+`values.schema.json` pins `config.global.allow_federation` and `config.global.allow_registration`
+to type `boolean`, so the quoted form is rejected at render time - existing values files that still
+carry quoted booleans have to be fixed before upgrading the chart.
+
+### Bind Address and Probes
+
+The readiness probe requests `/_tuwunel/server_version`, which answers in every configuration.
+`/_matrix/federation/v1/version` cannot be used instead: it returns 403 `M_FORBIDDEN` as soon as
+federation is disabled (`config.global.allow_federation: false`, the chart default).
+
+kubelet dials the pod's address (`status.podIP`) from the node's network namespace, so a
+`host: 127.0.0.1` override on the probe can never reach a pod's loopback - the server has to listen
+on the family the cluster assigns to pods:
+
+- the cluster assigns IPv6 pod addresses: keep the default `config.global.address: "::"` - one
+  dual-stack socket that serves IPv6 and IPv4-mapped clients;
+- the pod network has no usable IPv6 stack: set `config.global.address: "0.0.0.0"` - IPv4 only.
+
+Getting this wrong means the pod never becomes Ready: `kubectl describe pod` shows
+`Readiness probe failed: dial tcp [fd00:...]:8080: connect: connection refused`, while
+`kubectl get pods` shows `0/1` even though the container keeps running normally - the server is
+fine, it is simply not listening on the family the probe dials.
+
+`config.global.address` also accepts a list, but on tuwunel < v1.9 a two-address list promises
+listeners it does not open: `["0.0.0.0", "::"]` logs `Listening on [0.0.0.0:8080, [::]:8080]` while
+the two entries race for the same port and only one wins, leaving the other family unbound. Prefer a
+single address; an address that cannot be bound never serves at all - tuwunel v1.9 and later exit 1
+with `Failed to bind`, while earlier releases (including the default `v1.5.1`) announce the address
+and then shut down.
 
 ### Service Configuration
 
@@ -302,7 +336,7 @@ ingress:
 
 config:
   global:
-    allow_registration: "true"
+    allow_registration: true
     registration_token: "your-secret-token"
 ```
 
@@ -313,7 +347,7 @@ server_name: "matrix.example.org"
 
 config:
   global:
-    allow_federation: "true"
+    allow_federation: true
     trusted_servers:
       - "matrix.org"
 
@@ -354,8 +388,8 @@ ingress:
 
 config:
   global:
-    allow_registration: "false"
-    allow_federation: "true"
+    allow_registration: false
+    allow_federation: true
 ```
 
 ## License

@@ -64,9 +64,18 @@ envFromSecret: {}
 
 config:
   global:
-    allow_registration: "true"
+    ## Addresses tuwunel listens on. "::" is one dual-stack socket: it accepts
+    ## IPv6 and IPv4 (IPv4-mapped) connections. "0.0.0.0" is IPv4 only, which
+    ## leaves the server unreachable on clusters whose pod addresses are IPv6 -
+    ## kubelet probes and headless-service DNS use the pod's primary address.
+    ## A list of addresses is accepted as well.
+    address: "::"
+    ## Booleans have to be TOML booleans, not strings: tuwunel refuses to start
+    ## when the rendered file contains `allow_federation = "false"`
+    ## ("invalid type: found string \"false\", expected a boolean").
+    allow_registration: true
     registration_token: "supa-dupa-secret-token"
-    allow_federation: "false"
+    allow_federation: false
     trusted_servers: []
     tls: {}
     

@@ -18,7 +18,7 @@ ingress:
 
 config:
   global:
-    allow_federation: "true"
+    allow_federation: true
     trusted_servers:
       - matrix.org
     well_known:

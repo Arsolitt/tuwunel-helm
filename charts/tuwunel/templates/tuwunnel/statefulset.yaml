@@ -111,8 +111,11 @@ spec:
               value: "/data/db"
             - name: CONDUWUIT_PORT
               value: "8080"
+            # Same value as config.global.address in the rendered config.toml;
+            # the env var is what tuwunel reads, because environment variables
+            # win over the configuration file.
             - name: CONDUWUIT_ADDRESS
-              value: "0.0.0.0"
+              value: {{ .Values.config.global.address | default "::" | toJson | quote }}
             - name: CONDUWUIT_ROCKSDB_PARALLELISM_THREADS
               value: {{ $threads | quote }}
             - name: RUST_LOG
@@ -122,8 +125,11 @@ spec:
               value: {{ .value | quote }}
             {{- end }}
           readinessProbe:
+            # /_tuwunel/server_version answers in every configuration, while
+            # /_matrix/federation/v1/version returns 403 M_FORBIDDEN as soon as
+            # federation is disabled.
             httpGet:
-              path: /_matrix/federation/v1/version
+              path: /_tuwunel/server_version
               port: http
             periodSeconds: 2
             failureThreshold: 5

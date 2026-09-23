@@ -1,0 +1,16 @@
+# Scenario: pod network without a usable IPv6 stack.
+#
+# The chart default binds "::" (one dual-stack socket). A netns that cannot
+# take an IPv6 socket needs "0.0.0.0" instead - a configured address that
+# fails to bind stops tuwunel at startup, so the override has to keep working
+# (rendered by the `lint` job, started and probed by the `runtime` job).
+server_name: matrix.ci.example
+
+persistence:
+  data:
+    enabled: false
+
+config:
+  global:
+    address: "0.0.0.0"
+    allow_federation: false

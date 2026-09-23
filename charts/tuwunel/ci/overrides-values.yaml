@@ -51,7 +51,9 @@ envFromSecret:
 
 config:
   global:
-    allow_registration: "false"
+    # Unquoted on purpose: tuwunel rejects a TOML string where it wants a
+    # boolean, so `allow_registration: "false"` never was a working value.
+    allow_registration: false
 
 nodeSelector:
   ci.example/pool: general

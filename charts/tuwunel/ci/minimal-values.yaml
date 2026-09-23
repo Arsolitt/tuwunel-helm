@@ -10,5 +10,5 @@ persistence:
 
 config:
   global:
-    allow_registration: "false"
-    allow_federation: "false"
+    allow_registration: false
+    allow_federation: false

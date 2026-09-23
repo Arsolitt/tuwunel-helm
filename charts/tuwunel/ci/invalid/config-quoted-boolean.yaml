@@ -1,0 +1,8 @@
+# A quoted boolean renders as a TOML string and tuwunel exits at startup:
+# "invalid type: found string \"false\", expected a boolean for key
+# global.allow_federation". The schema has to refuse it before it ships.
+server_name: matrix.ci.example
+
+config:
+  global:
+    allow_federation: "false"
