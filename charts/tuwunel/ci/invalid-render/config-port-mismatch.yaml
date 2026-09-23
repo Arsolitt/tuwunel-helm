@@ -1,0 +1,14 @@
+# MUST fail the render (not the schema): the chart sets TUWUNEL_PORT from
+# service.port, and an environment variable wins over the file, so a differing
+# config.global.port would be silently ignored - the server would listen on
+# 8080 while the values file says 8008. The StatefulSet template fails instead.
+#
+# expect-error: config.global.port
+server_name: matrix.ci.example
+
+service:
+  port: 8080
+
+config:
+  global:
+    port: 8008

@@ -1,4 +1,20 @@
 {{- if .Values.rtc.enabled -}}
+{{- $livekit := .Values.rtc.livekit }}
+{{- $rtcConfig := (get $livekit.config "rtc" | default dict) }}
+{{- $udp := "" }}
+{{- if eq $livekit.networkMode "pod" }}
+  {{- /* A Service forwards one port per entry - a media port *range* cannot be
+         forwarded, so in pod mode the range has to collapse into a single
+         multiplexed UDP port. Both halves of that rule fail the render: a range
+         as udp_port, and a range-only configuration with no udp_port at all. */}}
+  {{- $udp = (get $rtcConfig "udp_port" | default "") | toString }}
+  {{- if contains "-" $udp }}
+    {{- fail "rtc.livekit.config.rtc.udp_port: a Kubernetes Service cannot expose a UDP port range; set a single port (e.g. 7882) or use rtc.livekit.networkMode=hostNetwork" }}
+  {{- end }}
+  {{- if and (not $udp) (hasKey $rtcConfig "port_range_start") }}
+    {{- fail "rtc.livekit.networkMode=pod needs rtc.livekit.config.rtc.udp_port: a Kubernetes Service cannot forward rtc.livekit.config.rtc.port_range_start/end, so media would have no path to the pod (use a single udp_port, or networkMode=hostNetwork)" }}
+  {{- end }}
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -6,13 +22,45 @@ metadata:
   labels:
     {{- include "tuwunel.labels" . | nindent 4 }}
     app.kubernetes.io/component: rtc-livekit
+  {{- with $livekit.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
-  type: ClusterIP
+  type: {{ $livekit.service.type }}
+  {{- if or (eq $livekit.service.type "NodePort") (eq $livekit.service.type "LoadBalancer") }}
+  {{- if $livekit.service.externalTrafficPolicy }}
+  # Local keeps the client on the node that actually hosts the pod; without it
+  # a LoadBalancer can forward media to a node with no LiveKit on it.
+  externalTrafficPolicy: {{ $livekit.service.externalTrafficPolicy }}
+  {{- end }}
+  {{- end }}
+  {{- if eq $livekit.service.type "LoadBalancer" }}
+  {{- if $livekit.service.loadBalancerIP }}
+  loadBalancerIP: {{ $livekit.service.loadBalancerIP | quote }}
+  {{- end }}
+  {{- if $livekit.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml $livekit.service.loadBalancerSourceRanges | nindent 4 }}
+  {{- end }}
+  {{- end }}
   ports:
     - name: http
-      port: {{ .Values.rtc.livekit.config.port }}
+      port: {{ $livekit.config.port }}
       targetPort: http
       protocol: TCP
+    {{- if (get $rtcConfig "tcp_port") }}
+    - name: rtc-tcp
+      port: {{ get $rtcConfig "tcp_port" }}
+      targetPort: rtc-tcp
+      protocol: TCP
+    {{- end }}
+    {{- if $udp }}
+    - name: rtc-udp
+      port: {{ $udp }}
+      targetPort: rtc-udp
+      protocol: UDP
+    {{- end }}
   selector:
     {{- include "tuwunel.labels" $ | nindent 4 }}
     app.kubernetes.io/component: rtc-livekit

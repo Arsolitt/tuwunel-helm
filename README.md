@@ -1,6 +1,6 @@
 # Tuwunel Helm Chart
 
-Helm chart for deploying [Tuwunel](https://github.com/matrix-construct/tuwunel) - a Matrix homeserver based on Conduit.
+Helm chart for deploying [Tuwunel](https://github.com/matrix-construct/tuwunel) - a Matrix homeserver based on Conduit. The chart targets tuwunel v1.9.0 or newer.
 
 This chart is designed for tuwunel but can also work with other Conduit forks such as [Continuwuity](https://continuwuity.org/).
 
@@ -8,12 +8,16 @@ This chart is designed for tuwunel but can also work with other Conduit forks su
 
 ## Features
 
-- Matrix homeserver deployment
-- Optional Matrix RTC support via LiveKit (Element Call)
-- Persistent storage support
-- Ingress configuration
+- Matrix homeserver deployment, configured through the `TUWUNEL_*` environment contract
+- Exec health probes (`tuwunel --health-check`) with a 30-minute startup budget for the one-time database migration after an upgrade
+- Optional Matrix RTC support via LiveKit (Element Call), in `hostNetwork` or `pod` network mode
+- Optional online database backups on a dedicated volume, with a scheduled SIGUSR2 sidecar
+- Local media storage, or an S3-compatible provider through `${VAR}` credentials
+- Persistent storage support with per-PVC annotations
+- Ingress configuration, including a separate RTC ingress
 - Resource management
 - Environment variable injection from secrets
+- A `helm test` hook that probes the readiness path from inside the cluster
 
 ## Add Repository
 
@@ -60,26 +64,60 @@ quantities).
 
 ### Quick Start
 
-The chart deploys with RocksDB storage by default:
+The chart deploys with RocksDB storage by default and keeps registration closed:
 
 ```yaml
 server_name: "yourdomain.com"
 
+envFromSecret:
+  REGISTRATION_TOKEN: tuwunel-secrets/REGISTRATION_TOKEN
+
 config:
   global:
-    allow_registration: "true"
-    registration_token: "your-secret-token"
+    # A TOML boolean, not a string: `allow_registration: "true"` is rejected by
+    # values.schema.json ("must be of type boolean") before it can render.
+    allow_registration: true
+    registration_token: "${REGISTRATION_TOKEN}"
 ```
+
+`registration_token: "${REGISTRATION_TOKEN}"` is substituted by the chart's envsubst init container
+from the value in the secret, so the token itself never has to be written into a values file. Use it
+to register the first account, then set `allow_registration: false` again. A placeholder whose
+environment variable is missing expands to an empty token, and tuwunel then refuses to start
+(`Registration token was specified but is empty`) rather than leaving registration open.
 
 ## Matrix RTC (Element Call) Support
 
-This chart supports Matrix RTC via LiveKit for Element Call functionality. See the [chart README](charts/tuwunel/README.md#matrix-rtc-element-call-support) for detailed configuration.
+This chart supports Matrix RTC via LiveKit for Element Call functionality. See the [chart README](charts/tuwunel/README.md#matrix-rtc-element-call-support) for the full configuration, both network modes and the TURN options.
 
 ### Prerequisites
 
-1. Create Kubernetes secret with LiveKit credentials
-2. Configure DNS for RTC domain
-3. Update `config.global.well_known.rtc_transports`
+1. Create Kubernetes secret with LiveKit credentials (`LIVEKIT_KEY`, `LIVEKIT_SECRET`)
+2. Configure DNS for RTC domain (`rtc.domain`) - it points at the node IP in `hostNetwork` mode and
+   at the Service address in `pod` mode
+3. Nothing else - `LIVEKIT_URL`, `LIVEKIT_FULL_ACCESS_HOMESERVERS`, the LiveKit webhook URL, the
+   LiveKit API keys and `config.global.well_known.livekit_url` are derived from `rtc.domain` and
+   `server_name`
+
+```yaml
+server_name: "yourdomain.com"
+
+rtc:
+  enabled: true
+  domain: "matrix-rtc.yourdomain.com"
+  jwt:
+    envFromSecret:
+      LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
+      LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
+  livekit:
+    envFromSecret:
+      LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
+      LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
+  ingress:
+    enabled: true
+    class: nginx
+    tls: true
+```
 
 ## Using with Other Conduit Forks
 
@@ -90,6 +128,10 @@ image:
   repository: ghcr.io/continuwuity/continuwuity
   tag: latest
 ```
+
+The chart's environment, probe and configuration contract targets tuwunel v1.9.0 or newer
+(`TUWUNEL_*` variables, `tuwunel --health-check`, `config.toml`); a fork without those needs
+`env`, `extraEnv` and `probes.*.enabled` adjustments.
 
 ## Releasing New Chart Versions
 
@@ -104,13 +146,16 @@ A merge that does not change the chart version publishes nothing, so documentati
 and CI changes are safe. Only stable versions are published - there is no
 pre-release channel.
 
-Every pull request runs `lint` (Helm 4 pinned, `helm lint --strict` plus
-`kubeconform` over the scenario values in [`charts/tuwunel/ci/`](charts/tuwunel/ci)),
-`schema` (the value schema must still reject the fixtures in
-[`charts/tuwunel/ci/invalid/`](charts/tuwunel/ci/invalid)) and `runtime`
-([`hack/runtime-check.sh`](hack/runtime-check.sh) starts the real image once per
-scenario and probes the readiness path). All three jobs run before the release
-job and are the ones worth marking as required checks.
+Every pull request runs `lint` (Helm 4 pinned, `helm lint --strict` for the chart defaults and every
+scenario values file, then `helm template` + `kubeconform -strict` for the defaults and every
+scenario on the Kubernetes versions in the workflow's `env:` block), `schema` (`charts/tuwunel/ci/
+invalid/*.yaml` must still be rejected by `values.schema.json`, `charts/tuwunel/ci/invalid-render/*.yaml`
+must be rejected by the chart's own template guards, and every supported scenario must render) and
+`runtime` ([`hack/runtime-check.sh`](hack/runtime-check.sh) renders each scenario, runs its init
+container as rendered to substitute the config, starts the real image with that scenario's env, runs
+the declared `tuwunel --health-check` probe and the readiness path, and exercises the backup path
+where the scenario enables it). All three jobs run before the release job and are the ones worth
+marking as required checks.
 
 ## Development
 
@@ -129,6 +174,11 @@ helm template ci charts/tuwunel --set server_name=matrix.example.org \
 
 # The schema must reject these
 for f in charts/tuwunel/ci/invalid/*.yaml; do
+  helm template ci charts/tuwunel -f "$f" > /dev/null && echo "unexpectedly accepted: $f"
+done
+
+# These must be rejected by a template guard, not by the schema
+for f in charts/tuwunel/ci/invalid-render/*.yaml; do
   helm template ci charts/tuwunel -f "$f" > /dev/null && echo "unexpectedly accepted: $f"
 done
 

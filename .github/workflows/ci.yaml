@@ -6,6 +6,13 @@
 # filter never reports a status, so requiring it would block every merge that
 # does not touch those paths.
 #
+#   lint     renders the chart defaults and every ci/*-values.yaml fixture and
+#            validates each render against the Kubernetes schemas.
+#   schema   proves ci/invalid/*.yaml is refused by values.schema.json and
+#            ci/invalid-render/*.yaml is refused by the template that owns the
+#            cross-value rule, so neither guardrail can be dropped silently.
+#   runtime  starts the real image on every fixture (see hack/runtime-check.sh).
+#
 # Tool pins live in `env:` below; Dependabot keeps the actions themselves fresh.
 name: CI
 
@@ -71,26 +78,35 @@ jobs:
         run: |
           set -euo pipefail
           manifest="${RUNNER_TEMP}/tuwunel-manifests.yaml"
-          for values in "$CHART_DIR"/ci/*-values.yaml; do
+          validate() {
+            local label="$1"
+            shift
             for k8s in $KUBERNETES_VERSIONS; do
-              echo "::group::$(basename "$values") on Kubernetes $k8s"
+              echo "::group::$label on Kubernetes $k8s"
               # Render to a .yaml file before validating: kubeconform keys off
               # the file extension, and input it does not recognise is reported
               # as "0 resource found" with exit code 0 - a silent no-op.
-              helm template ci "$CHART_DIR" -f "$values" > "$manifest"
+              helm template ci "$CHART_DIR" "$@" > "$manifest"
               expected=$(grep -c '^kind:' "$manifest" || true)
               if [ "$expected" -eq 0 ]; then
-                echo "::error file=$values::$values rendered no resources"
+                echo "::error::$label rendered no resources"
                 exit 1
               fi
               summary=$(kubeconform -strict -summary -kubernetes-version "$k8s" "$manifest")
               echo "$summary"
               if ! grep -qE "Summary: $expected resources? found" <<<"$summary"; then
-                echo "::error file=$values::kubeconform validated an unexpected number of resources (rendered $expected)"
+                echo "::error::$label: kubeconform validated an unexpected number of resources (rendered $expected)"
                 exit 1
               fi
               echo "::endgroup::"
             done
+          }
+          # The defaults are a supported install too, and they are what most
+          # users get: chart-releaser publishes this chart as-is, so validating
+          # only the fixtures would leave the published configuration unchecked.
+          validate "default values"
+          for values in "$CHART_DIR"/ci/*-values.yaml; do
+            validate "$(basename "$values")" -f "$values"
           done
 
   schema:
@@ -110,8 +126,14 @@ jobs:
       - name: Impossible values must be rejected
         run: |
           set -euo pipefail
+          shopt -s nullglob
+          fixtures=("$CHART_DIR"/ci/invalid/*.yaml)
+          if [ "${#fixtures[@]}" -eq 0 ]; then
+            echo "::error::no fixtures under $CHART_DIR/ci/invalid/ - this check would pass without validating anything"
+            exit 1
+          fi
           status=0
-          for values in "$CHART_DIR"/ci/invalid/*.yaml; do
+          for values in "${fixtures[@]}"; do
             if out=$(helm template ci "$CHART_DIR" -f "$values" 2>&1); then
               echo "::error file=$values::$values was accepted, but it must be rejected by $CHART_DIR/values.schema.json"
               status=1
@@ -125,6 +147,50 @@ jobs:
           done
           exit $status
 
+      # Not every impossible value is a schema question: the port that the
+      # chart writes into TUWUNEL_PORT has to agree with service.port, and a
+      # UDP port *range* cannot go through a Service - those are cross-value
+      # rules the schema cannot express, so a template refuses them. The
+      # refusal has to be the template's own and it has to name the value that
+      # caused it, which every fixture declares in an `# expect-error:` line.
+      - name: Values the templates must refuse
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          fixtures=("$CHART_DIR"/ci/invalid-render/*.yaml)
+          if [ "${#fixtures[@]}" -eq 0 ]; then
+            echo "::error::no fixtures under $CHART_DIR/ci/invalid-render/ - this check would pass without validating anything"
+            exit 1
+          fi
+          status=0
+          for values in "${fixtures[@]}"; do
+            expected=$(sed -n 's/^# expect-error: //p' "$values")
+            if [ -z "$expected" ]; then
+              echo "::error file=$values::$values has no '# expect-error: <substring>' line naming the value the render must report"
+              status=1
+              continue
+            fi
+            if out=$(helm template ci "$CHART_DIR" -f "$values" 2>&1); then
+              echo "::error file=$values::$values rendered, but a template has to refuse it ($expected)"
+              status=1
+              continue
+            fi
+            if grep -qi schema <<<"$out"; then
+              echo "::error file=$values::$values was rejected by values.schema.json, not by the template that owns the rule ($expected):"
+              echo "$out"
+              status=1
+              continue
+            fi
+            if ! grep -qF "$expected" <<<"$out"; then
+              echo "::error file=$values::$values was refused without naming '$expected':"
+              echo "$out"
+              status=1
+              continue
+            fi
+            echo "refused by a template as expected: $values ($expected)"
+          done
+          exit $status
+
       - name: Supported value shapes must keep working
         run: |
           set -euo pipefail
@@ -134,17 +200,22 @@ jobs:
           done
 
   # The other jobs only prove the manifests have the right *shape*. `helm lint`,
-  # `kubeconform` and `values.schema.json` never read the rendered config.toml,
+  # `kubeconform` and values.schema.json never read the rendered config.toml,
   # and no schema says anything about the readiness path - yet both decide
   # whether tuwunel starts at all: a config value of the wrong TOML type
   # (`allow_federation = "false"` instead of `= false`) makes the process exit 1
   # at startup, and a path that answers 403 while federation is disabled leaves
   # the pod permanently NotReady. This job is the only gate that starts the real
-  # image on every fixture and probes the exact path the readiness probe uses.
+  # image on every fixture, and it drives it with what that fixture renders: the
+  # init container runs envsubst to produce the config the server really reads,
+  # the probe command from the manifest itself is executed, the readiness URL is
+  # the one the `helm test` pod uses, and a config that asks for online backups
+  # gets the crontab's SIGUSR2 and has to produce a repository - so a path or a
+  # name that only exists in the chart's own assumptions fails here.
   runtime:
     name: Runtime smoke test against the real image
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -154,10 +225,10 @@ jobs:
         with:
           version: ${{ env.HELM_VERSION }}
 
-      # One container per fixture, started with the env vars and the config.toml
-      # of that fixture's own render; the container is removed after every
-      # fixture and by the trap, so a leak can never mask the next one.
-      - name: Start the image and probe the readiness path
+      # Every fixture now runs the init container, an exec probe and the
+      # readiness request; the container is removed after every fixture and by
+      # the script's trap, so a leak can never mask the next one.
+      - name: Start the image and probe it the way the manifests say
         run: hack/runtime-check.sh "$CHART_DIR"
 
   release:

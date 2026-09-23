@@ -1,0 +1,42 @@
+# Scenario: LiveKit in pod network mode, reached through a LoadBalancer.
+#
+# Host networking is the other half of this pair. Here the media ports have to
+# go through rtc.livekit.service, which can only forward a single UDP port - so
+# config.rtc.udp_port replaces the port range, and externalTrafficPolicy: Local
+# keeps the client on the node that hosts the pod. Rendered and validated only:
+# nothing in CI starts LiveKit.
+server_name: matrix.ci.example
+
+rtc:
+  enabled: true
+  domain: rtc.ci.example
+
+  jwt:
+    envFromSecret:
+      LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
+      LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
+
+  livekit:
+    networkMode: pod
+    nodeSelector:
+      ci.example/pool: rtc
+    podAnnotations:
+      ci.example/note: rtc
+    envFromSecret:
+      LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
+      LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
+    service:
+      type: LoadBalancer
+      externalTrafficPolicy: Local
+      annotations:
+        ci.example/managed: "true"
+      loadBalancerIP: 203.0.113.30
+      loadBalancerSourceRanges:
+        - 203.0.113.0/24
+    config:
+      rtc:
+        # A single multiplexed UDP port, exposed by the Service as rtc-udp
+        udp_port: 7882
+        tcp_port: 7881
+        use_external_ip: false
+        node_ip: 203.0.113.30

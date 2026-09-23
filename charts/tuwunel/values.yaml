@@ -3,15 +3,12 @@
 ## You probably want this to be your apex domain.
 server_name: "yourdomain.com"
 
-## Example full RTC configuration (for quick reference)
+## Matrix RTC (Element Call) example (for quick reference).
 ## Uncomment and modify as needed:
 # rtc:
 #   enabled: true
 #   domain: "matrix-rtc.yourdomain.com"
 #   jwt:
-#     env:
-#       LIVEKIT_URL: "wss://matrix-rtc.yourdomain.com"
-#       LIVEKIT_FULL_ACCESS_HOMESERVERS: "yourdomain.com"
 #     envFromSecret:
 #       LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
 #       LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
@@ -19,40 +16,47 @@ server_name: "yourdomain.com"
 #     envFromSecret:
 #       LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
 #       LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
-#     config:
-#       keys:
-#         "${LIVEKIT_KEY}": "${LIVEKIT_SECRET}"
 #   ingress:
 #     enabled: true
 #     class: nginx
 #     tls: true
-#     # TLS secret name (defaults to <release-name>-rtc-tls if not specified)
-#     tlsSecretName: ""
-# 
-# ## Then add to config.global.well_known:
-# config:
-#   global:
-#     well_known:
-#       rtc_transports:
-#         - type: livekit
-#           livekit_service_url: "https://matrix-rtc.yourdomain.com"
+#
+## LIVEKIT_URL, LIVEKIT_FULL_ACCESS_HOMESERVERS, the LiveKit webhook URL, the
+## LiveKit `keys` entry and config.global.well_known.livekit_url are all derived
+## from rtc.domain and server_name; set them yourself to override the derivation.
 
 image:
   repository: ghcr.io/matrix-construct/tuwunel
-  tag: v1.5.1
+  tag: v1.9.2
   pullPolicy: IfNotPresent
 
-## Init container for envsubst
+## Init container for envsubst.
+## dibi/envsubst:1 is published for linux/amd64 only: on an arm64 cluster either
+## point this at a multi-arch (or mirrored) equivalent, or pin the architecture
+## through nodeSelector. The main image is multi-arch and unaffected.
 initContainer:
   image:
     repository: dibi/envsubst
     tag: "1"
     pullPolicy: IfNotPresent
 
+## busybox, used by the scheduled-backup sidecar (crond) and the `helm test` pod.
+## Both run on any architecture, so this one has to stay multi-arch.
+busybox:
+  image:
+    repository: busybox
+    tag: "1.37"
+    pullPolicy: IfNotPresent
+
+## Pull secrets for every pod the chart creates
+imagePullSecrets: []
+
 ## The keys under config must be valid for the configuration file of
 ## Conduwuit, Tuwunel, or Continuwuity as this section is converted into
 ## the configuration file
 ## Plain text environment variables for envsubst
+## These are set on the init container (which substitutes ${VAR} placeholders in
+## the configuration) and on the tuwunel container itself.
 env: {}
 
 ## Raw environment variable sections (for complex configurations)
@@ -71,14 +75,52 @@ config:
     ## A list of addresses is accepted as well.
     address: "::"
     ## Booleans have to be TOML booleans, not strings: tuwunel refuses to start
-    ## when the rendered file contains `allow_federation = "false"`
+    ## when the rendered file contains `allow_registration = "false"`
     ## ("invalid type: found string \"false\", expected a boolean").
-    allow_registration: true
-    registration_token: "supa-dupa-secret-token"
+    ##
+    ## Registration is closed by default. To open it for the first user, add a
+    ## token through envsubst and a secret - never in plain values:
+    ##
+    ##   envFromSecret:
+    ##     REGISTRATION_TOKEN: tuwunel-secrets/REGISTRATION_TOKEN
+    ##
+    ## and set
+    ##
+    ##   registration_token: "${REGISTRATION_TOKEN}"
+    ##
+    ## here (or `registration_token_file` to a file on the pod). A secret that is
+    ## missing or misnamed makes envsubst render an empty token, and tuwunel
+    ## then refuses to start ("Registration token was specified but is empty
+    ## (\"\")"), so a broken secret is loud rather than silently open. Enabling
+    ## registration without any token also needs the explicit opt-in
+    ## yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse.
+    allow_registration: false
     allow_federation: false
     trusted_servers: []
     tls: {}
-    
+    ## Log level: trace, debug, info, warn, error. "info" is the default.
+    ## There is no RUST_LOG knob in tuwunel; this key is the one that works.
+    log: "info"
+    ## Where the client IP is read from when tuwunel sits behind an ingress or a
+    ## reverse proxy. Unset means "connect_info": the address of whoever opened
+    ## the TCP connection, which is the proxy - so every client looks like it
+    ## comes from a single IP (rate limiting, invites and moderation all see the
+    ## proxy). Header-based values raise 500 M_UNKNOWN for any request that does
+    ## not carry the header, so only set this when the proxy always sets it.
+    ## One of: connect_info, rightmost_x_forwarded_for, rightmost_forwarded,
+    ## x_real_ip, cf_connecting_ip, true_client_ip, fly_client_ip,
+    ## cloudfront_viewer_address
+    # ip_source: rightmost_x_forwarded_for
+    ## CIDRs whose address is taken from the connection instead of ip_source.
+    ## The in-cluster pod CIDR belongs here, so probes and mesh traffic keep
+    ## their real source.
+    # ip_source_trusted_subnets:
+    #   - 10.42.0.0/16
+    ## RocksDB thread pool size and background worker count. The default (2048)
+    ## can exceed the pod's task limit on a many-core node, which fails startup
+    ## with EAGAIN; a value around the CPU limit is plenty.
+    # db_pool_max_workers: 64
+
     ## Well-known configuration
     ## Used for Matrix server discovery and RTC services
     well_known: {}
@@ -87,24 +129,38 @@ config:
     #   ## Client delegation (if using delegated domain)
     #   client: "https://matrix.yourdomain.com"
     #   server: "matrix.yourdomain.com:443"
-    #   
+    #
     #   ## RTC transports for Element Call
-    #   ## This enables Matrix RTC functionality
-    #   ## Replace matrix-rtc.yourdomain.com with your RTC domain
+    #   ## rtc.enabled sets livekit_url for you; set it here only to override,
+    #   ## and only one of livekit_url / rtc_transports - the chart injects
+    #   ## livekit_url when neither is present.
+    #   livekit_url: "https://matrix-rtc.yourdomain.com"
     #   rtc_transports:
     #     - type: livekit
     #       livekit_service_url: "https://matrix-rtc.yourdomain.com"
-    
+
     ## If you are delegating your apex domain, uncomment the client and server lines
     ## and replace the domains with the domain your service is running on
     #  client: "https://matrix.example.com"
     #  server: "matrix.example.com:443"
-    blurhashing: {}
+    ## Media storage. Without configuration, media lives in a `media/`
+    ## subdirectory of database_path on the data volume. An S3-compatible
+    ## provider (see the upstream storage-providers page) looks like this -
+    ## credentials go through envsubst, so keep them in a secret:
+    # media_storage_providers: ["media_on_s3"]
+    # storage_provider:
+    #   media_on_s3:
+    #     s3:
+    #       endpoint: "https://s3.example.com"
+    #       bucket: "tuwunel-media"
+    #       region: "us-east-1"
+    #       key: "${S3_ACCESS_KEY}"
+    #       secret: "${S3_SECRET_KEY}"
+    #       ## startup_check pings the bucket at startup and aborts it when the
+    #       ## bucket is unreachable; leave it on unless the provider is
+    #       ## expected to be down while the homeserver starts.
+    #       # startup_check: false
     ldap: {}
-    antispam: {}
-      # meowlnir: {}
-      # draupnir: {}
-
 
 extraEnv: []
 
@@ -114,11 +170,32 @@ extraLabels: {}
 ## Add annotations to the StatefulSet
 statefulsetAnnotations: {}
 
+## Labels and annotations for the tuwunel pod template. A `checksum/config`
+## annotation that covers the rendered configuration and environment is always
+## added, so editing config/env rolls the pod; these are merged on top.
+podLabels: {}
+podAnnotations: {}
+
+## Pod priorityClassName, applied when set
+priorityClassName: ""
+
+## The first start after a homeserver upgrade runs a one-time blocking database
+## migration. tuwunel's own deployment guidance asks for 30 minutes, and
+## Kubernetes sends SIGKILL once this expires (which leaves the database
+## half-migrated, not merely slow), so the default is deliberately long.
+terminationGracePeriodSeconds: 1800
+
+## Extra arguments for the tuwunel container, e.g. the recovery recipe in the
+## README: args: ["--restore-backup", "--maintenance"]
+args: []
+
 service:
   annotations: {}
   type: ClusterIP
   clusterIP: "None"
 
+  ## The single port knob of the chart: the Service, the Ingress backends, the
+  ## container port and TUWUNEL_PORT are all rendered from it.
   port: 8080
   ## List of IP addresses at which the service is available
   ## Ref: https://kubernetes.io/docs/user-guide/services/#external-ips
@@ -147,12 +224,9 @@ ingress:
 ## Persist configuration to a persistent volume
 persistence:
   ## Data Persistent Volume Storage Class
-  ## If defined, storageClassName: <storageClass>
-  ## If unset, storageClassName: "", which disables dynamic provisioning
-  ## If undefined (the default) or set to null, no storageClassName spec is
-  ##   set, choosing the default provisioner.  (gp2 on AWS, standard on
-  ##   GKE, AWS & OpenStack)
-  ##
+  ## Unset or "" - no storageClassName, the cluster's default provisioner decides
+  ## "-"           - storageClassName: "", i.e. bind a pre-created PV by hand
+  ## anything else - that class, quoted
   data:
     enabled: true
     existingClaim: ""
@@ -160,6 +234,75 @@ persistence:
     accessMode: ReadWriteOnce
     # Your database and uploads will live here
     size: 4Gi
+
+## Annotations for the PersistentVolumeClaims the chart creates
+pvcAnnotations: {}
+
+## Extra volumes and volume mounts for the tuwunel container.
+## extraVolumeMounts entries need a name that matches a volume here (or one of
+## the chart's own: data, config-template, config, tmp, backup).
+extraVolumes: []
+extraVolumeMounts: []
+
+## Liveness, readiness and startup probes. All three run
+## `tuwunel --health-check` inside the container, which asks the running server
+## whether it is up; it exits non-zero while the server is still migrating or
+## already unhealthy.
+## The startup probe alone covers the first start after an upgrade: 10s x 180 =
+## 30 minutes, the budget tuwunel's own deployment guidance prescribes for the
+## one-time database migration. The migration runs before the server listens,
+## so the readiness probe would otherwise fail - and be counted - the whole time.
+probes:
+  startup:
+    enabled: true
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 180
+    initialDelaySeconds: 0
+  readiness:
+    enabled: true
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+    initialDelaySeconds: 0
+  liveness:
+    enabled: true
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+    initialDelaySeconds: 0
+
+## Online database backups (tuwunel's built-in, no external tooling).
+## A backup is written to backup.path on its own volume; the admin room can take
+## one on demand with `!admin server backup-database`, and backup.scheduled arms
+## a cron sidecar that signals the server with SIGUSR2.
+backup:
+  enabled: false
+  ## Use an existing claim instead of creating <release>-backup
+  existingClaim: ""
+  ## Same three-way rule as persistence.data.storageClass
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 5Gi
+  ## Mount path inside the container; rendered as database_backup_path.
+  ## Keep it out of the data volume: a backup has to survive losing that volume.
+  path: /backups
+  ## database_backups_to_keep - older backups are pruned after a new one
+  keep: 7
+  ## Add a cron sidecar that sends SIGUSR2 to the server (server backup-database)
+  scheduled: false
+  ## Five-field cron expression; the schema rejects anything else
+  schedule: "0 3 * * *"
+  ## The admin command the sidecar's signal runs (admin_signal_execute)
+  command: server backup-database
+  sidecar:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
 
 resources:
   requests:
@@ -177,35 +320,39 @@ affinity: {}
 
 ## Matrix RTC (Real-Time Communication) Configuration
 ## Enables Element Call functionality via LiveKit integration
-## 
+##
 ## Prerequisites:
 ## 1. Create Kubernetes secret with LiveKit credentials:
 ##    kubectl create secret generic livekit-secrets \
 ##      --from-literal=LIVEKIT_KEY=<20-char-key> \
 ##      --from-literal=LIVEKIT_SECRET=<64-char-secret>
 ##
-## 2. Configure DNS for RTC domain (e.g., matrix-rtc.yourdomain.com)
+## 2. Configure DNS for the RTC domain (e.g., matrix-rtc.yourdomain.com)
 ##
-## 3. Update config.global.well_known.rtc_transports with your RTC domain
+## 3. Nothing else: LIVEKIT_URL, LIVEKIT_FULL_ACCESS_HOMESERVERS, the LiveKit
+##    webhook URL and config.global.well_known.livekit_url follow from
+##    rtc.domain and server_name. Without livekit_url the server's
+##    rtc/transports endpoint answers with an empty list and clients report
+##    that no MatrixRTC transport is configured.
 ##
 ## Documentation: https://github.com/element-hq/lk-jwt-service
 rtc:
   ## Enable Matrix RTC support (default: false)
   enabled: false
-  
+
   ## RTC domain where LiveKit services will be accessible
   ## Example: matrix-rtc.yourdomain.com
   ## This domain needs DNS configured to point to your cluster
   domain: ""
-  
+
   ## JWT Service Configuration
   ## Handles authentication tokens for LiveKit
   jwt:
     image:
       repository: ghcr.io/element-hq/lk-jwt-service
-      tag: 0.4.1
+      tag: 0.7.0
       pullPolicy: IfNotPresent
-    
+
     resources:
       requests:
         cpu: 50m
@@ -213,35 +360,38 @@ rtc:
       limits:
         cpu: 200m
         memory: 256Mi
-    
+
     ## Plain text environment variables
-    ## Example:
-    ## env:
-    ##   LIVEKIT_URL: "wss://matrix-rtc.yourdomain.com"
-    ##   LIVEKIT_JWT_BIND: ":8080"
+    ## LIVEKIT_URL, LIVEKIT_FULL_ACCESS_HOMESERVERS and LIVEKIT_JWT_BIND are
+    ## derived from rtc.domain and server_name; set them to override.
     env: {}
-    
+
     ## Raw environment variable sections (for complex configurations)
     envRaw: []
-    
+
     ## Environment variables from Kubernetes secrets
     ## Format: VARIABLE_NAME: secret-name/key-name
     ## The secret must contain LIVEKIT_KEY and LIVEKIT_SECRET
-    ## 
+    ##
     ## Example:
     ## envFromSecret:
     ##   LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
     ##   LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
     envFromSecret: {}
-  
+
+    podAnnotations: {}
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
   ## LiveKit Media Server Configuration
   ## Handles WebRTC media streams for calls
   livekit:
     image:
       repository: livekit/livekit-server
-      tag: v1.9.12
+      tag: v1.13.7
       pullPolicy: IfNotPresent
-    
+
     resources:
       requests:
         cpu: 50m
@@ -249,87 +399,131 @@ rtc:
       limits:
         cpu: 1
         memory: 1Gi
-    
+
     ## Plain text environment variables
     env: {}
-    
+
     ## Raw environment variable sections (for complex configurations)
     envRaw: []
-    
+
     ## Environment variables from Kubernetes secrets
     ## At minimum, requires LIVEKIT_KEY and LIVEKIT_SECRET
-    ## 
+    ##
     ## Example:
     ## envFromSecret:
     ##   LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
     ##   LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
     envFromSecret: {}
-    
-    ## Network mode for LiveKit pods
-    ## Currently only hostNetwork is supported
-    ## Pod uses host network namespace for direct access to host ports
-    ## Required for WebRTC connections
+
+    ## How media reaches the server. Both modes work; pick by what has to be
+    ## reachable from the internet.
+    ##
+    ## hostNetwork (default): the pod shares the node's network namespace, so
+    ##   clients connect to the node IP - rtc.domain has to resolve to it, and
+    ##   every port below is a node port that needs a firewall rule. WebRTC
+    ##   needs a UDP port range here (config.rtc.port_range_start/end).
+    ##   Set config.rtc.use_external_ip: false with config.rtc.node_ip when the
+    ##   node's public address is bound to an interface, or the container's
+    ##   bridge addresses are advertised as ICE candidates.
+    ##
+    ## pod: media arrives through the Service in rtc.livekit.service, with a
+    ##   LoadBalancer or NodePort per port. A Service cannot forward a UDP
+    ##   range, so config.rtc.udp_port has to be a single port (the chart fails
+    ##   the render otherwise) instead of port_range_start/end, and media
+    ##   candidates come from config.rtc.node_ip (or use_external_ip: true).
+    ##   Use externalTrafficPolicy: Local so clients reach the node that hosts
+    ##   the pod.
     networkMode: "hostNetwork"
-    
-    ## TODO: Implement LoadBalancer support for cloud deployments
-    ## This will allow using Kubernetes LoadBalancer service instead of hostNetwork
-    ## Benefits:
-    ##   - Preserves client source IP with externalTrafficPolicy: Local
-    ##   - Better cloud integration
-    ##   - No need for host network access
-    ## Requirements:
-    ##   - Cloud provider LoadBalancer support
-    ##   - Proper port configuration for UDP range
-    
+
+    podAnnotations: {}
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+    ## Exposes the RTC media ports. Only meaningful in networkMode: pod - the
+    ## hostNetwork pod is reached on the node IP directly.
+    service:
+      type: ClusterIP
+      annotations: {}
+      ## Cluster or Local; Local is what a LoadBalancer should use for WebRTC
+      externalTrafficPolicy: Cluster
+      loadBalancerIP: ""
+      loadBalancerSourceRanges: []
+
     ## LiveKit server configuration
     ## This is converted to livekit.yaml and processed with envsubst
-    ## Documentation: https://docs.livekit.io/guides/getting-started
+    ## Documentation: https://docs.livekit.io/transport/self-hosting/deployment/
     config:
       ## HTTP server port
       port: 7880
       ## Network interfaces to bind (empty = all interfaces)
       bind_addresses: [""]
-      
+
       ## WebRTC configuration
       rtc:
         ## TCP port for RTC connections
         tcp_port: 7881
         ## UDP port range for media streams
         ## These ports must be accessible from clients
-        ## For LoadBalancer mode, configure your cloud provider
         ## For hostNetwork mode, ensure firewall allows these ports
         port_range_start: 50100
         port_range_end: 50200
+        ## Single UDP port to multiplex media on. Required in networkMode: pod
+        ## (a Service cannot forward a range); when set it replaces the range
+        ## above, which then only applies to hostNetwork.
+        # udp_port: 7882
         ## Use external IP for ICE candidates (recommended)
         use_external_ip: true
+        ## Address advertised to clients when the node IP is known; only takes
+        ## effect while use_external_ip is false
+        # node_ip: "203.0.113.10"
+        ## Drop the host's private/bridge interfaces from the ICE candidates;
+        ## the fix when clients are offered unreachable docker0 addresses
+        # external_ip_only: true
         ## Disable loopback ICE candidates (for security)
         enable_loopback_candidate: false
-      
+
+        ## External TURN (e.g. coturn) passed through to clients
+        # turn_servers:
+        #   - host: turn.yourdomain.com
+        #     port: 5349
+        #     protocol: tls
+        #     secret: "TURN_STATIC_AUTH_SECRET"
+
+      ## LiveKit's own TURN server; needs its own UDP ports reachable
+      # turn:
+      #   enabled: true
+      #   udp_port: 3478
+      #   relay_range_start: 50300
+      #   relay_range_end: 65535
+      #   domain: matrix-rtc.yourdomain.com
+
       ## LiveKit API keys
-      ## Use envsubst placeholders that will be replaced from secrets
-      ## Example:
-      ## keys:
-      ##   "${LIVEKIT_KEY}": "${LIVEKIT_SECRET}"
-      keys: {}
-  
+      ## Defaults to {"${LIVEKIT_KEY}": "${LIVEKIT_SECRET}"}, i.e. the values of
+      ## the envsubst placeholders above, so a secret is all that is needed.
+      ## Set this only to override - and note that every key listed here has to
+      ## be reachable by the JWT service through the same env vars.
+      # keys: {}
+
   ## Ingress configuration for RTC domain
   ingress:
     ## Enable RTC ingress (default: false)
     enabled: false
-    
-    ## Ingress class (e.g., nginx, traefik)
+
+    ## Ingress class (e.g., nginx, traefik); falls back to ingress.class, and
+    ## the cluster's default class is used when both are empty
     class: ""
-    
+
     ## Additional annotations for ingress
     ## Example for nginx-ingress:
     ## annotations:
     ##   cert-manager.io/cluster-issuer: "letsencrypt-prod"
     ##   nginx.ingress.kubernetes.io/proxy-body-size: "0"
     annotations: {}
-    
+
     ## Enable TLS (recommended for production)
     tls: false
-    
+
     ## TLS secret name (defaults to <release-name>-rtc-tls)
     ## Required if tls is enabled
     tlsSecretName: ""

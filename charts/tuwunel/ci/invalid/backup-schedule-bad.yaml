@@ -1,0 +1,9 @@
+# MUST be rejected: a four-field cron expression is not a schedule - a missing
+# field is the classic way to get an expression that never fires (or fires every
+# minute), and the sidecar would be silently useless.
+server_name: matrix.ci.example
+
+backup:
+  enabled: true
+  scheduled: true
+  schedule: "0 3 * *"

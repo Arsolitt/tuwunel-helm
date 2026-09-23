@@ -1,9 +1,43 @@
+{{- $cfg := deepCopy .Values.config }}
+{{- $global := (get $cfg "global" | default dict) }}
+{{- $injected := false }}
+{{/* rtc.enabled has to advertise the focus on both MatrixRTC discovery
+     surfaces, and the client API endpoint
+     (/_matrix/client/unstable/org.matrix.msc4143/rtc/transports) is built from
+     `livekit_url` alone - without it clients report "no transport available"
+     even when .well-known is correct. A value the user set is left alone:
+     rtc_transports is the escape hatch for a non-LiveKit focus. */}}
+{{- if and .Values.rtc.enabled .Values.rtc.domain }}
+{{- $wk := (get $global "well_known" | default dict) }}
+{{- if not (or (hasKey $wk "livekit_url") (hasKey $wk "rtc_transports")) }}
+{{- $_ := set $wk "livekit_url" (printf "https://%s" .Values.rtc.domain) }}
+{{- $_ := set $global "well_known" $wk }}
+{{- $injected = true }}
+{{- end }}
+{{- end }}
+{{/* Backups are configured in exactly one place: the volume the chart mounts
+     and the path the server writes to cannot drift apart. */}}
+{{- if .Values.backup.enabled }}
+{{- if not (hasKey $global "database_backup_path") }}
+{{- $_ := set $global "database_backup_path" .Values.backup.path }}
+{{- $injected = true }}
+{{- end }}
+{{- if not (hasKey $global "database_backups_to_keep") }}
+{{- $_ := set $global "database_backups_to_keep" (int .Values.backup.keep) }}
+{{- $injected = true }}
+{{- end }}
+{{- if and .Values.backup.scheduled (not (hasKey $global "admin_signal_execute")) }}
+{{- $_ := set $global "admin_signal_execute" (list .Values.backup.command) }}
+{{- $injected = true }}
+{{- end }}
+{{- end }}
+{{- if $injected }}
+{{- $_ := set $cfg "global" $global }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ template "tuwunel.fullname" . }}-configmap
 data:
   config.toml: |
-    {{- with .Values.config }}
-    {{- toToml . | nindent 3 }}
-    {{- end }}
+    {{- toToml $cfg | nindent 4 }}

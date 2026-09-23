@@ -18,6 +18,13 @@ for f in charts/tuwunel/ci/*-values.yaml; do helm template ci charts/tuwunel -f 
 # The schema must reject these
 for f in charts/tuwunel/ci/invalid/*.yaml; do helm template ci charts/tuwunel -f "$f" > /dev/null && echo "accepted: $f"; done
 
+# Only a template can reject these (values.schema.json says nothing about a rule
+# that spans two values) - each fixture declares the value its refusal must name
+for f in charts/tuwunel/ci/invalid-render/*.yaml; do helm template ci charts/tuwunel -f "$f" > /dev/null && echo "accepted: $f"; done
+
+# The runtime gate: renders every fixture and starts its image (needs docker)
+hack/runtime-check.sh charts/tuwunel
+
 # Template charts (render YAML)
 helm template release-name charts/tuwunel --include-crds > output.yaml
 
@@ -39,18 +46,24 @@ helm package charts/tuwunel
 `.github/workflows/ci.yaml` is the only pipeline; job ids double as status-check contexts.
 
 - `lint` - `helm lint --strict` for the chart defaults and every `charts/tuwunel/ci/*-values.yaml`
-  scenario, then `helm template` + `kubeconform -strict` for each scenario on the Kubernetes
-  versions in `env.KUBERNETES_VERSIONS`.
+  scenario, then `helm template` + `kubeconform -strict` for the **default values** and each
+  scenario on the Kubernetes versions in `env.KUBERNETES_VERSIONS` (the defaults are what
+  chart-releaser publishes, so they are validated too).
 - `schema` - asserts that `charts/tuwunel/ci/invalid/*.yaml` is still rejected **by the schema**
-  (not by an unrelated template error) and that every supported scenario still renders.
-- `runtime` - starts the real image once per `charts/tuwunel/ci/*-values.yaml` scenario with that
-  scenario's rendered env vars and a bind-mounted rendered `config.toml`, and polls the readiness
-  probe's port and path until it answers 200 (90 s per scenario; a container that exits by itself,
-  or a path that never returns 200, fails with the container's `docker logs`). It is the only job
-  that can see a config value written with the wrong TOML type (`allow_federation = "false"` makes
-  tuwunel exit 1 at startup) or a readiness path that answers 403 in the default
-  federation-disabled configuration; the other jobs check manifest shape only and never read the
-  rendered config file.
+  (not by an unrelated template error), that `charts/tuwunel/ci/invalid-render/*.yaml` is
+  rejected **by a template** for the value its `# expect-error:` line names, and that every
+  supported scenario still renders.
+- `runtime` - renders each `charts/tuwunel/ci/*-values.yaml` scenario and drives the real image
+  with what that render says: it runs the scenario's own init container (`dibi/envsubst`) to
+  produce the config.toml the server reads, starts the server with the rendered env, config and
+  database path, then requires the rendered probe command (`tuwunel --health-check`) to exit 0
+  and the readiness URL from the `helm.sh/hook: test` pod to answer 200. A config that turns on
+  online backups additionally gets the crontab's SIGUSR2 from a container sharing the server's
+  PID namespace and has to produce a backup repository. `hack/runtime-check.sh` hardcodes no env
+  name, path or probe - it is the only job that can see a config value written with the wrong
+  TOML type (`allow_federation = "false"` makes tuwunel exit 1 at startup) or a readiness path
+  that answers 403 in the default federation-disabled configuration; the other jobs check
+  manifest shape only and never read the rendered config file.
 - `release` - `push` to `main` only, `needs: [lint, schema, runtime]`, runs `chart-releaser`. It packages
   charts whose `version` is not released yet, creates the `tuwunel-<version>` tag and GitHub
   release, and updates `index.yaml` on `gh-pages`. Unchanged versions are skipped, so a
@@ -60,6 +73,18 @@ Rules that keep this honest:
 
 - Tool pins live in the workflow `env:` block (Helm, kubeconform + its sha256, chart-releaser,
   Kubernetes versions). Nothing uses `@latest`; Dependabot bumps the actions.
+- Three fixture categories, one meaning each: `charts/tuwunel/ci/*-values.yaml` must render,
+  `ci/invalid/*.yaml` must be rejected by `values.schema.json`, and `ci/invalid-render/*.yaml`
+  must be rejected by a template `fail` (each names the value in its `# expect-error:` line).
+  A fixture in the wrong folder makes the job that owns it fail, not pass.
+- The chart defaults are a supported configuration, so `lint` renders and validates them next to
+  the fixtures - chart-releaser publishes exactly those defaults.
+- `hack/runtime-check.sh` reads its images, env, paths and probes out of the render. If it needs
+  to know something the manifests do not say, that is a bug in the manifests.
+- `dibi/envsubst` (the init image) is published for `linux/amd64` only; the runtime gate passes
+  `--platform linux/amd64` to the init container on a non-amd64 daemon and nothing else, so a
+  native amd64 runner needs no emulation. Overriding `initContainer.image` to a multi-arch or
+  mirrored equivalent is supported and takes the same path.
 - Adding a value means touching three places: `values.yaml`, `values.schema.json`, and the value
   tables in `charts/tuwunel/README.md`.
 - `charts/tuwunel/.helmignore` excludes `ci/`; scenario and invalid fixtures never ship.
@@ -170,7 +195,7 @@ charts/tuwunel/
 ├── values.yaml             # Default configuration
 ├── values.schema.json      # Value validation, enforced by CI
 ├── README.md               # Documentation
-├── ci/                     # CI value fixtures (*-values.yaml, invalid/)
+├── ci/                     # CI value fixtures (*-values.yaml, invalid/, invalid-render/)
 ├── templates/
 │   ├── _helpers.tpl        # Reusable functions
 │   ├── NOTES.txt           # Post-install notes
@@ -199,7 +224,8 @@ charts/tuwunel/
 1. Add to `values.yaml` with comment and default
 2. Reference in template
 3. Cover the key in `values.schema.json` (and add a `ci/invalid/` fixture if the key has a shape
-   that must be rejected)
+   that must be rejected, or a `ci/invalid-render/` fixture if the refusal belongs to a template
+   that has to compare two values)
 4. Update `charts/tuwunel/README.md`
 5. Test with `helm template`, or add a scenario under `charts/tuwunel/ci/` when the combination of
    values deserves permanent coverage

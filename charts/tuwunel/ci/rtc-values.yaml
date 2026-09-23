@@ -1,8 +1,10 @@
 # Scenario: Matrix RTC (Element Call) enabled with LiveKit and the JWT service.
 #
 # Exercises the rtc/* templates: both sidecar deployments and services, the
-# LiveKit configmap with envsubst placeholders, secret-sourced env vars and the
-# RTC ingress.
+# LiveKit configmap, secret-sourced env vars and the RTC ingress. Everything the
+# chart is supposed to derive is deliberately left unset: no well_known block
+# (livekit_url is injected), no LIVEKIT_URL / LIVEKIT_FULL_ACCESS_HOMESERVERS /
+# LIVEKIT_JWT_BIND, no livekit.config.keys, no networkMode (hostNetwork default).
 server_name: matrix.ci.example
 
 rtc:
@@ -10,9 +12,6 @@ rtc:
   domain: rtc.ci.example
 
   jwt:
-    env:
-      LIVEKIT_URL: wss://rtc.ci.example
-      LIVEKIT_FULL_ACCESS_HOMESERVERS: matrix.ci.example
     envFromSecret:
       LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
       LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
@@ -21,9 +20,6 @@ rtc:
     envFromSecret:
       LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
       LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
-    config:
-      keys:
-        "${LIVEKIT_KEY}": "${LIVEKIT_SECRET}"
 
   ingress:
     enabled: true
@@ -35,7 +31,4 @@ rtc:
 
 config:
   global:
-    well_known:
-      rtc_transports:
-        - type: livekit
-          livekit_service_url: https://rtc.ci.example
+    allow_federation: false

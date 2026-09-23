@@ -1,0 +1,28 @@
+# MUST fail the render (not the schema): a Kubernetes Service forwards exactly
+# one port per entry, so a UDP *range* cannot be exposed in pod network mode.
+# Host networking takes the range; otherwise it has to collapse into a single
+# multiplexed udp_port. The livekit-service template fails instead of rendering
+# a deployment whose media ports are unreachable.
+#
+# expect-error: rtc.livekit.config.rtc.udp_port
+server_name: matrix.ci.example
+
+rtc:
+  enabled: true
+  domain: rtc.ci.example
+
+  jwt:
+    envFromSecret:
+      LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
+      LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
+
+  livekit:
+    networkMode: pod
+    envFromSecret:
+      LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
+      LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
+    service:
+      type: LoadBalancer
+    config:
+      rtc:
+        udp_port: "7882-7892"

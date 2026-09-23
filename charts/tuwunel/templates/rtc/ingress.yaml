@@ -1,5 +1,7 @@
 {{- if and .Values.rtc.enabled .Values.rtc.ingress.enabled -}}
 {{- $fullName := include "tuwunel.fullname" . -}}
+{{- $class := .Values.rtc.ingress.class | default .Values.ingress.class -}}
+{{- $jwtPaths := list "/get_token" "/sfu/get" "/healthz" "/delegate_delayed_leave" "/sfu_webhook" -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -11,12 +13,15 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
     nginx.ingress.kubernetes.io/websocket-services: {{ $fullName }}-livekit
+    # WebRTC signalling and the SFU websocket are long-lived; buffering them
+    # adds latency to every call setup.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
     {{- with .Values.rtc.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
-  {{- if .Values.rtc.ingress.class }}
-  ingressClassName: {{ .Values.rtc.ingress.class | quote }}
+  {{- if $class }}
+  ingressClassName: {{ $class | quote }}
   {{- end }}
   {{- if .Values.rtc.ingress.tls }}
   tls:
@@ -28,20 +33,15 @@ spec:
     - host: {{ .Values.rtc.domain }}
       http:
         paths:
-          - path: /sfu/get
+          {{- range $jwtPaths }}
+          - path: {{ . }}
             pathType: Prefix
             backend:
               service:
                 name: {{ $fullName }}-jwt
                 port:
                   number: 8080
-          - path: /healthz
-            pathType: Prefix
-            backend:
-              service:
-                name: {{ $fullName }}-jwt
-                port:
-                  number: 8080
+          {{- end }}
           - path: /
             pathType: Prefix
             backend:

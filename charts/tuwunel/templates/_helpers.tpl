@@ -32,13 +32,6 @@ Create chart name and version as used by the chart label.
 {{- end -}}
 
 {{/*
-Generate chart secret name
-*/}}
-{{- define "tuwunel.secretName" -}}
-  {{- default (include "tuwunel.fullname" .) .Values.secret.nameOverride -}}
-{{- end -}}
-
-{{/*
 Generate all the labels for chart-deployed resources
 */}}
 {{- define "tuwunel.labels" -}}

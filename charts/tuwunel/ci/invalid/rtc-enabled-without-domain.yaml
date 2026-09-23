@@ -1,0 +1,8 @@
+# MUST be rejected: with rtc.enabled the RTC domain is what the livekit_url
+# discovery value, the JWT service's LIVEKIT_URL and the ingress host are built
+# from. Without it the chart would render an unroutable deployment (and an
+# ingress with an empty host), so the schema requires it.
+server_name: matrix.ci.example
+
+rtc:
+  enabled: true

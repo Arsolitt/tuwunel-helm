@@ -136,6 +136,29 @@
         }
       }
     },
+    "rtcIngressSpec": {
+      "description": "RTC ingress. The RTC host serves a fixed path set (the JWT service's endpoints, everything else to LiveKit), so unlike the main ingress there is no path or extraHosts knob.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "class": {
+          "type": "string"
+        },
+        "annotations": {
+          "$ref": "#/definitions/stringMap"
+        },
+        "tls": {
+          "type": "boolean"
+        },
+        "tlsSecretName": {
+          "type": "string"
+        }
+      }
+    },
     "rtcSidecarSpec": {
       "description": "Shape shared by the RTC JWT service and the LiveKit server.",
       "type": "object",
@@ -155,6 +178,108 @@
         },
         "envFromSecret": {
           "$ref": "#/definitions/secretEnvMap"
+        },
+        "podAnnotations": {
+          "$ref": "#/definitions/stringMap"
+        },
+        "nodeSelector": {
+          "$ref": "#/definitions/stringMap"
+        },
+        "tolerations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "affinity": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "probeSpec": {
+      "description": "One exec probe against `tuwunel --health-check`. The timeout is per attempt, so the worst case is periodSeconds x failureThreshold.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "periodSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "failureThreshold": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "initialDelaySeconds": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "backupSpec": {
+      "description": "tuwunel's built-in online database backups: a volume mounted at backup.path and the configuration keys that point the server at it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "existingClaim": {
+          "type": "string"
+        },
+        "storageClass": {
+          "type": "string"
+        },
+        "accessMode": {
+          "type": "string",
+          "enum": ["ReadWriteOnce", "ReadOnlyMany", "ReadWriteMany", "ReadWriteOncePod"]
+        },
+        "size": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?([eE][+-]?[0-9]+)?(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"
+        },
+        "path": {
+          "description": "Absolute mount path inside the container; rendered as database_backup_path.",
+          "type": "string",
+          "pattern": "^/"
+        },
+        "keep": {
+          "description": "Rendered as database_backups_to_keep; older backups are pruned after a new one.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "scheduled": {
+          "type": "boolean"
+        },
+        "schedule": {
+          "description": "Five-field cron expression for the sidecar that signals the server with SIGUSR2.",
+          "type": "string",
+          "pattern": "^\\s*\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s*$"
+        },
+        "command": {
+          "description": "Rendered as admin_signal_execute: the admin console command a SIGUSR2 runs.",
+          "type": "string",
+          "minLength": 1
+        },
+        "sidecar": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["resources"],
+          "properties": {
+            "resources": {
+              "$ref": "#/definitions/resourcesSpec"
+            }
+          }
         }
       }
     }
@@ -185,6 +310,31 @@
         }
       }
     },
+    "busybox": {
+      "description": "Image for the scheduled-backup sidecar and the `helm test` pod. Has to be multi-arch.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image"],
+      "properties": {
+        "image": {
+          "$ref": "#/definitions/imageSpec"
+        }
+      }
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
     "env": {
       "$ref": "#/definitions/scalarMap"
     },
@@ -195,7 +345,7 @@
       "$ref": "#/definitions/secretEnvMap"
     },
     "config": {
-      "description": "Rendered verbatim into config.toml, so any tuwunel/Conduit configuration key is accepted here. The keys pinned under global are the ones whose type stops the server from starting when it is wrong (quoted booleans, an unparsable bind address).",
+      "description": "Rendered verbatim into config.toml, so any tuwunel/Conduit configuration key is accepted here. The keys pinned under global are the ones whose type stops the server from starting when it is wrong (quoted booleans, an unparsable bind address, a misspelled ip_source), or that the chart also derives from a value of its own.",
       "type": "object",
       "additionalProperties": true,
       "properties": {
@@ -227,6 +377,55 @@
             "allow_registration": {
               "description": "Must be a boolean: the string \"true\" makes tuwunel exit at startup.",
               "type": "boolean"
+            },
+            "log": {
+              "description": "Log level: trace, debug, info, warn, error.",
+              "type": "string",
+              "minLength": 1
+            },
+            "ip_source": {
+              "description": "Where the client IP comes from behind a proxy. A misspelled value makes every request fail with 500 M_UNKNOWN on a header-based source (or silently mis-attribute every IP), so the accepted set is pinned to upstream's.",
+              "type": "string",
+              "enum": [
+                "connect_info",
+                "rightmost_x_forwarded_for",
+                "rightmost_forwarded",
+                "x_real_ip",
+                "cf_connecting_ip",
+                "true_client_ip",
+                "fly_client_ip",
+                "cloudfront_viewer_address"
+              ]
+            },
+            "ip_source_trusted_subnets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "db_pool_max_workers": {
+              "description": "RocksDB background worker/pool size; upstream's 2048 default can exceed the pod's task limit on a many-core node and fail startup with EAGAIN.",
+              "type": "integer",
+              "minimum": 1
+            },
+            "database_backup_path": {
+              "description": "Where online backups are written; the chart renders this from backup.path when backup.enabled.",
+              "type": "string",
+              "pattern": "^/"
+            },
+            "database_backups_to_keep": {
+              "description": "How many backups are kept; the chart renders this from backup.keep when backup.enabled.",
+              "type": "integer",
+              "minimum": 1
+            },
+            "server_name": {
+              "description": "Accepted for compatibility, but it must match the server_name value: the chart sets TUWUNEL_SERVER_NAME, which wins over the file.",
+              "type": ["string", "number"]
+            },
+            "port": {
+              "description": "Accepted for compatibility, but it must match service.port: the chart sets TUWUNEL_PORT, which wins over the file.",
+              "type": ["string", "integer"]
             }
           }
         }
@@ -250,11 +449,87 @@
         }
       }
     },
+    "args": {
+      "description": "Extra arguments for the tuwunel container, e.g. --restore-backup.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
     "extraLabels": {
       "$ref": "#/definitions/stringMap"
     },
     "statefulsetAnnotations": {
       "$ref": "#/definitions/stringMap"
+    },
+    "podLabels": {
+      "$ref": "#/definitions/stringMap"
+    },
+    "podAnnotations": {
+      "$ref": "#/definitions/stringMap"
+    },
+    "priorityClassName": {
+      "type": "string"
+    },
+    "terminationGracePeriodSeconds": {
+      "description": "Has to cover the one-time database migration on the first start after an upgrade (upstream asks for 30 minutes); a SIGKILL in the middle of it leaves the database half-migrated.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "pvcAnnotations": {
+      "$ref": "#/definitions/stringMap"
+    },
+    "extraVolumes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "extraVolumeMounts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["name", "mountPath"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mountPath": {
+            "type": "string",
+            "pattern": "^/"
+          }
+        }
+      }
+    },
+    "probes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startup", "readiness", "liveness"],
+      "properties": {
+        "startup": {
+          "$ref": "#/definitions/probeSpec"
+        },
+        "readiness": {
+          "$ref": "#/definitions/probeSpec"
+        },
+        "liveness": {
+          "$ref": "#/definitions/probeSpec"
+        }
+      }
+    },
+    "backup": {
+      "$ref": "#/definitions/backupSpec"
     },
     "service": {
       "type": "object",
@@ -273,7 +548,7 @@
           "type": "string"
         },
         "port": {
-          "description": "Rendered verbatim into the Service, the Ingress backend and the StatefulSet; both 8080 and \"8080\" are accepted.",
+          "description": "The chart's single port: rendered into the Service, the Ingress backends, the container port and TUWUNEL_PORT. Both 8080 and \"8080\" are accepted.",
           "oneOf": [
             {
               "type": "integer",
@@ -325,6 +600,7 @@
               "type": "string"
             },
             "storageClass": {
+              "description": "Chart-wide rule: unset or \"\" leaves storageClassName out (the default provisioner decides), \"-\" renders storageClassName: \"\" (bind a pre-created PV), anything else is quoted.",
               "type": "string"
             },
             "accessMode": {
@@ -361,6 +637,24 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["enabled"],
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        },
+        "required": ["enabled"]
+      },
+      "then": {
+        "description": "With RTC enabled, the domain is what the discovery record, the JWT service and the ingress are built from - a missing one would render an unroutable deployment.",
+        "required": ["domain"],
+        "properties": {
+          "domain": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
       "properties": {
         "enabled": {
           "type": "boolean"
@@ -369,7 +663,7 @@
           "type": "string"
         },
         "ingress": {
-          "$ref": "#/definitions/ingressSpec"
+          "$ref": "#/definitions/rtcIngressSpec"
         },
         "jwt": {
           "$ref": "#/definitions/rtcSidecarSpec"
@@ -394,13 +688,59 @@
             "envFromSecret": {
               "$ref": "#/definitions/secretEnvMap"
             },
+            "podAnnotations": {
+              "$ref": "#/definitions/stringMap"
+            },
+            "nodeSelector": {
+              "$ref": "#/definitions/stringMap"
+            },
+            "tolerations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "affinity": {
+              "type": "object",
+              "additionalProperties": true
+            },
             "networkMode": {
-              "description": "Only hostNetwork is implemented; the deployment template always sets hostNetwork: true.",
+              "description": "hostNetwork shares the node's network namespace (fixed ports, a UDP range is fine); pod routes media through rtc.livekit.service, which can only forward the single config.rtc.udp_port.",
               "type": "string",
-              "enum": ["hostNetwork"]
+              "enum": ["hostNetwork", "pod"]
+            },
+            "service": {
+              "description": "Only used with networkMode: pod.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["type"],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["ClusterIP", "NodePort", "LoadBalancer"]
+                },
+                "annotations": {
+                  "$ref": "#/definitions/stringMap"
+                },
+                "externalTrafficPolicy": {
+                  "type": "string",
+                  "enum": ["Cluster", "Local"]
+                },
+                "loadBalancerIP": {
+                  "type": "string"
+                },
+                "loadBalancerSourceRanges": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
             },
             "config": {
-              "description": "Rendered verbatim into livekit.yaml; any LiveKit configuration key is accepted here.",
+              "description": "Rendered verbatim into livekit.yaml; any LiveKit configuration key is accepted here. The chart adds keys (keys, room.auto_create, webhook.*) that the JWT pairing needs, only when they are absent.",
               "type": "object",
               "additionalProperties": true
             }

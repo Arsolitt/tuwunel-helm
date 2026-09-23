@@ -3,13 +3,14 @@
 #
 # Guards the schema against over-restriction: numeric and string CPU quantities,
 # a quoted service port, a numeric init-container tag, extra/untyped env values,
-# scheduling knobs and labels/annotations.
+# scheduling knobs and labels/annotations. The tag is pinned on purpose: the
+# runtime job starts this exact image, and the TUWUNEL_* contract needs >= v1.9.
 nameOverride: tuwunel-ci
 
 server_name: matrix.ci.example
 
 image:
-  tag: "v1.5.1"
+  tag: "v1.9.2"
 
 initContainer:
   image:
@@ -37,7 +38,7 @@ statefulsetAnnotations:
   ci.example/note: rendered
 
 env:
-  RUST_LOG: debug
+  TUWUNEL_LOG: debug
   CONDUWUIT_ALLOW_REGISTRATION: false
 
 extraEnv:

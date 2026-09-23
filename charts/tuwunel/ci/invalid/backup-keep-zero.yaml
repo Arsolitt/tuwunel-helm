@@ -1,0 +1,8 @@
+# MUST be rejected: keep: 0 means "prune every backup after taking the next
+# one", i.e. a backup that never survives until it is needed. database_backups_to_keep
+# has a minimum of 1.
+server_name: matrix.ci.example
+
+backup:
+  enabled: true
+  keep: 0

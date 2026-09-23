@@ -1,0 +1,9 @@
+# MUST be rejected: `xforwarded_for` is a typo for `rightmost_x_forwarded_for`.
+# A header-based source that does not exist silently mis-attributes every client
+# IP (rate limiting and moderation act on the proxy's address), so the schema
+# pins the accepted set to upstream's.
+server_name: matrix.ci.example
+
+config:
+  global:
+    ip_source: xforwarded_for

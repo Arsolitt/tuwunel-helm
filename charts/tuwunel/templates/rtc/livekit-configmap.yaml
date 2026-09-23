@@ -1,4 +1,26 @@
 {{- if .Values.rtc.enabled -}}
+{{/* Defaults the pairing needs but that are easy to get wrong: lk-jwt-service
+     validates the webhook calls LiveKit makes back into it, and a room that is
+     auto-created on a token request is exactly the hole the JWT service is
+     meant to close. Every key is only added when the user did not set it or its
+     sub-key, so an existing LiveKit configuration renders unchanged. */}}
+{{- $cfg := deepCopy .Values.rtc.livekit.config }}
+{{- if not (hasKey $cfg "keys") }}
+  {{- $_ := set $cfg "keys" (dict "${LIVEKIT_KEY}" "${LIVEKIT_SECRET}") }}
+{{- end }}
+{{- $room := (get $cfg "room" | default dict) }}
+{{- if not (hasKey $room "auto_create") }}
+  {{- $_ := set $room "auto_create" false }}
+{{- end }}
+{{- $_ := set $cfg "room" $room }}
+{{- $webhook := (get $cfg "webhook" | default dict) }}
+{{- if not (hasKey $webhook "api_key") }}
+  {{- $_ := set $webhook "api_key" "${LIVEKIT_KEY}" }}
+{{- end }}
+{{- if not (hasKey $webhook "urls") }}
+  {{- $_ := set $webhook "urls" (list (printf "http://%s-jwt:8080/sfu_webhook" (include "tuwunel.fullname" .))) }}
+{{- end }}
+{{- $_ := set $cfg "webhook" $webhook }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -8,7 +30,5 @@ metadata:
     app.kubernetes.io/component: rtc-livekit
 data:
   livekit.yaml: |
-    {{- with .Values.rtc.livekit.config }}
-    {{- toYaml . | nindent 4 }}
-    {{- end }}
+    {{- toYaml $cfg | nindent 4 }}
 {{- end }}

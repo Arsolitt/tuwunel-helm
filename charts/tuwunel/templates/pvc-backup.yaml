@@ -1,21 +1,22 @@
-{{- if and .Values.persistence.data.enabled (not .Values.persistence.data.existingClaim) }}
+{{- if and .Values.backup.enabled (not .Values.backup.existingClaim) }}
 kind: PersistentVolumeClaim
 apiVersion: v1
 metadata:
-  name: {{ template "tuwunel.fullname" . }}-data
+  name: {{ template "tuwunel.fullname" . }}-backup
   labels:
     {{- include "tuwunel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tuwunel-backup
   {{- with .Values.pvcAnnotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
   accessModes:
-    - {{ .Values.persistence.data.accessMode | quote }}
+    - {{ .Values.backup.accessMode | quote }}
   resources:
     requests:
-      storage: {{ .Values.persistence.data.size | quote }}
-  {{- $class := .Values.persistence.data.storageClass }}
+      storage: {{ .Values.backup.size | quote }}
+  {{- $class := .Values.backup.storageClass }}
   {{- if eq (printf "%v" $class) "-" }}
   # "-" means "no provisioner": bind a pre-created PV by hand
   storageClassName: ""

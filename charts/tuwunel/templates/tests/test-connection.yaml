@@ -1,0 +1,36 @@
+{{- $fullName := include "tuwunel.fullname" . }}
+# `helm test <release>`: proves the Service answers on the port the chart
+# rendered, from inside the cluster - the one thing a schematic render cannot.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ $fullName }}-test-connection
+  labels:
+    {{- include "tuwunel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tuwunel-test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: wget
+      image: "{{ .Values.busybox.image.repository }}:{{ .Values.busybox.image.tag }}"
+      imagePullPolicy: {{ .Values.busybox.image.pullPolicy }}
+      command: ["wget"]
+      args:
+        - "-q"
+        - "--spider"
+        - "http://{{ $fullName }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}/_tuwunel/server_version"
+      securityContext:
+        readOnlyRootFilesystem: true
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL

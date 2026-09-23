@@ -1,0 +1,10 @@
+# MUST be rejected: `bridge` is not a network mode the chart implements. It used
+# to be accepted and then ignored - the LiveKit deployment always ran with
+# hostNetwork - which is worse than refusing the value.
+server_name: matrix.ci.example
+
+rtc:
+  enabled: true
+  domain: rtc.ci.example
+  livekit:
+    networkMode: bridge

@@ -1,4 +1,7 @@
 {{- if .Values.rtc.enabled -}}
+{{- $livekit := .Values.rtc.livekit }}
+{{- $hostNetwork := eq $livekit.networkMode "hostNetwork" }}
+{{- $rtcConfig := (get $livekit.config "rtc" | default dict) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -19,8 +22,24 @@ spec:
       labels:
         {{- include "tuwunel.labels" . | nindent 8 }}
         app.kubernetes.io/component: rtc-livekit
+      annotations:
+        # livekit.yaml only reaches the pod through the init container, so
+        # without this a configuration change would never restart it.
+        checksum/livekit-config: {{ include (print $.Template.BasePath "/rtc/livekit-configmap.yaml") . | sha256sum }}
+        {{- with $livekit.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
+      {{- if $hostNetwork }}
+      # hostNetwork pins the RTC endpoint to the node whose address rtc.domain
+      # resolves to, which is what makes the fixed ports below reachable.
       hostNetwork: true
+      # Without this a hostNetwork pod keeps the node's resolver and cannot
+      # resolve the <release>-jwt Service name it posts webhooks to.
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- else }}
+      hostNetwork: false
+      {{- end }}
       securityContext:
         seccompProfile:
           type: RuntimeDefault
@@ -31,18 +50,18 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - envsubst < /tmp/config-template/livekit.yaml > /tmp/config/livekit.yaml
-          {{- if or (.Values.rtc.livekit.env) (.Values.rtc.livekit.envRaw) (.Values.rtc.livekit.envFromSecret) }}
+          {{- if or ($livekit.env) ($livekit.envRaw) ($livekit.envFromSecret) }}
           env:
-          {{- range $key, $val := .Values.rtc.livekit.env }}
+          {{- range $key, $val := $livekit.env }}
             - name: {{ $key }}
               value: {{ $val | quote }}
           {{- end }}
-          {{- if .Values.rtc.livekit.envRaw }}
-            {{- with .Values.rtc.livekit.envRaw }}
+          {{- if $livekit.envRaw }}
+            {{- with $livekit.envRaw }}
               {{- toYaml . | nindent 12 }}
             {{- end }}
           {{- end }}
-          {{- range $key, $val := .Values.rtc.livekit.envFromSecret }}
+          {{- range $key, $val := $livekit.envFromSecret }}
             - name: {{ $key }}
               valueFrom:
                 secretKeyRef:
@@ -65,14 +84,35 @@ spec:
                 - ALL
       containers:
         - name: livekit
-          image: "{{ .Values.rtc.livekit.image.repository }}:{{ .Values.rtc.livekit.image.tag }}"
-          imagePullPolicy: {{ .Values.rtc.livekit.image.pullPolicy }}
+          image: "{{ $livekit.image.repository }}:{{ $livekit.image.tag }}"
+          imagePullPolicy: {{ $livekit.image.pullPolicy }}
           args: ["--config", "/tmp/config/livekit.yaml"]
           ports:
             - name: http
-              containerPort: {{ .Values.rtc.livekit.config.port }}
+              containerPort: {{ $livekit.config.port }}
+            {{- if (get $rtcConfig "tcp_port") }}
             - name: rtc-tcp
-              containerPort: {{ .Values.rtc.livekit.config.rtc.tcp_port }}
+              containerPort: {{ get $rtcConfig "tcp_port" }}
+            {{- end }}
+            {{- if (get $rtcConfig "udp_port") }}
+            - name: rtc-udp
+              containerPort: {{ get $rtcConfig "udp_port" }}
+              protocol: UDP
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
           volumeMounts:
             - name: config
               mountPath: /tmp/config
@@ -85,7 +125,19 @@ spec:
               drop:
                 - ALL
           resources:
-            {{- toYaml .Values.rtc.livekit.resources | nindent 12 }}
+            {{- toYaml $livekit.resources | nindent 12 }}
+      {{- with $livekit.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $livekit.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $livekit.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       volumes:
         - name: config-template
           configMap:

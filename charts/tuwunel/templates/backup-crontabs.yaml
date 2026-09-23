@@ -1,0 +1,15 @@
+{{- if and .Values.backup.enabled .Values.backup.scheduled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ template "tuwunel.fullname" . }}-backup-crontabs
+  labels:
+    {{- include "tuwunel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tuwunel-backup
+data:
+  # busybox crond reads one file per user from its spool directory (`-c`); the
+  # sidecar shares the pod's PID namespace, so the signal reaches the server,
+  # which answers it by running admin_signal_execute.
+  root: |
+    {{ .Values.backup.schedule }} pkill -USR2 -x tuwunel
+{{- end }}

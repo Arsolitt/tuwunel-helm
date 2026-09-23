@@ -2,7 +2,8 @@
 #
 # Exercises the ingress delegated-domain branch (config.global.well_known.server
 # is set, so the template adds the /.well-known/matrix and /_matrix paths),
-# TLS, extra hosts and federation settings.
+# TLS, extra hosts, federation settings, the client-IP knobs behind a proxy and
+# the pod-level passthrough (annotations, extra volume/mount).
 server_name: matrix.ci.example
 
 ingress:
@@ -16,11 +17,29 @@ ingress:
   extraHosts:
     - alias.ci.example
 
+podAnnotations:
+  ci.example/note: rendered
+podLabels:
+  ci.example/tier: edge
+
+extraVolumes:
+  - name: ci-extra
+    emptyDir: {}
+extraVolumeMounts:
+  - name: ci-extra
+    mountPath: /var/lib/ci-extra
+
 config:
   global:
     allow_federation: true
     trusted_servers:
       - matrix.org
+    # A header-based source has to be paired with the subnets whose address is
+    # taken from the connection instead - the in-cluster CIDR keeps its real
+    # source, so probes and intra-cluster calls do not depend on the header.
+    ip_source: rightmost_x_forwarded_for
+    ip_source_trusted_subnets:
+      - 10.42.0.0/16
     well_known:
       client: https://matrix.ci.example
       server: matrix.ci.example:443

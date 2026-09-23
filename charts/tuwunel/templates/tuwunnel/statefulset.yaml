@@ -13,6 +13,21 @@
   {{- end }}
 {{- end }}
 
+{{/* The chart owns the listener: TUWUNEL_PORT and TUWUNEL_ADDRESS come from the
+     values below, and an environment variable beats the configuration file. A
+     conflicting key in config.global would therefore be silently ignored, which
+     is exactly the kind of mismatch that ends up as "the chart ignores my
+     port". Fail the render instead. */}}
+{{- $global := (get .Values.config "global" | default dict) }}
+{{- $configPort := get $global "port" }}
+{{- if and $configPort (ne (printf "%v" $configPort) (printf "%v" .Values.service.port)) }}
+{{- fail (printf "config.global.port (%v) must equal service.port (%v): the chart sets TUWUNEL_PORT from service.port" $configPort .Values.service.port) }}
+{{- end }}
+{{- $configServerName := get $global "server_name" }}
+{{- if and $configServerName (ne (printf "%v" $configServerName) (printf "%v" .Values.server_name)) }}
+{{- fail (printf "config.global.server_name (%v) must equal server_name (%v): the chart sets TUWUNEL_SERVER_NAME from server_name" $configServerName .Values.server_name) }}
+{{- end }}
+
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -37,6 +52,18 @@ spec:
       labels:
         {{- include "tuwunel.labels" . | nindent 8 }}
         app.kubernetes.io/component: tuwunel
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        # Rolling restart trigger: the rendered configuration and the env vars
+        # both reach the server only at pod start, and neither changes the pod
+        # template on its own - without this annotation `helm upgrade` with a
+        # new config.global leaves the old configuration running.
+        checksum/config: {{ printf "%s%s" (include (print $.Template.BasePath "/tuwunnel/configmap.yaml") . | sha256sum) (printf "%v%v%v" .Values.env .Values.envRaw .Values.envFromSecret | sha256sum) }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       securityContext:
         runAsNonRoot: true
@@ -46,6 +73,21 @@ spec:
         fsGroup: 2020
         seccompProfile:
           type: RuntimeDefault
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.priorityClassName }}
+      priorityClassName: {{ .Values.priorityClassName | quote }}
+      {{- end }}
+      # A SIGKILL in the middle of the one-time database migration leaves the
+      # database half-migrated; the default of 30s is not enough for it.
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      # The backup sidecar signals the tuwunel process by name (pkill -USR2 -x
+      # tuwunel), so both containers have to see each other's processes.
+      {{- if .Values.backup.scheduled }}
+      shareProcessNamespace: true
+      {{- end }}
       initContainers:
         - name: config-processor
           image: "{{ .Values.initContainer.image.repository }}:{{ .Values.initContainer.image.tag }}"
@@ -83,9 +125,13 @@ spec:
         - name: tuwunel
           image: "{{ .Values.image.repository }}:{{ tpl .Values.image.tag . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: http
-              containerPort: 8080
+              containerPort: {{ .Values.service.port }}
           volumeMounts:
             - mountPath: /data
               name: data
@@ -94,6 +140,13 @@ spec:
               name: config
             - mountPath: /tmp
               name: tmp
+            {{- if .Values.backup.enabled }}
+            - mountPath: {{ .Values.backup.path }}
+              name: backup
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
@@ -101,40 +154,109 @@ spec:
               drop:
                 - ALL
           env:
+            # Chart-owned variables, in the canonical TUWUNEL_ prefix (the
+            # CONDUIT_/CONDUWUIT_ aliases of older releases rank below it, so a
+            # leftover CONDUWUIT_PORT in `env` no longer decides the port).
+            - name: TUWUNEL_CONFIG
+              value: "/tmp/config/config.toml"
+            - name: TUWUNEL_SERVER_NAME
+              value: {{ required "You must set a server name otherwise no one will be able to reach you" .Values.server_name | quote }}
+            - name: TUWUNEL_DATABASE_PATH
+              value: {{ get $global "database_path" | default "/data/db" | quote }}
+            - name: TUWUNEL_PORT
+              value: {{ .Values.service.port | quote }}
+            # Same value as config.global.address in the rendered config.toml;
+            # the env var is what tuwunel reads when both are present.
+            - name: TUWUNEL_ADDRESS
+              value: {{ get $global "address" | default "::" | toJson | quote }}
             - name: TOKIO_WORKER_THREADS
               value: {{ $threads | quote }}
-            - name: CONDUWUIT_CONFIG
-              value: "/tmp/config/config.toml"
-            - name: CONDUWUIT_SERVER_NAME
-              value: {{ required "You must set a server name otherwise no one will be able to reach you" .Values.server_name | quote }}
-            - name: CONDUWUIT_DATABASE_PATH
-              value: "/data/db"
-            - name: CONDUWUIT_PORT
-              value: "8080"
-            # Same value as config.global.address in the rendered config.toml;
-            # the env var is what tuwunel reads, because environment variables
-            # win over the configuration file.
-            - name: CONDUWUIT_ADDRESS
-              value: {{ .Values.config.global.address | default "::" | toJson | quote }}
-            - name: CONDUWUIT_ROCKSDB_PARALLELISM_THREADS
+            - name: TUWUNEL_ROCKSDB_PARALLELISM_THREADS
               value: {{ $threads | quote }}
-            - name: RUST_LOG
-              value: info
+            # The same variables the init container substitutes into the
+            # configuration, so ${VAR} placeholders and direct references agree.
+            {{- range $key, $val := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+            {{- end }}
+            {{- if .Values.envRaw }}
+            {{- with .Values.envRaw }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- end }}
+            {{- range $key, $val := .Values.envFromSecret }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ (split "/" $val)._0 }}
+                  key: {{ (split "/" $val)._1 }}
+            {{- end }}
             {{- range .Values.extraEnv }}
             - name: {{ .name | quote }}
               value: {{ .value | quote }}
             {{- end }}
+          {{- with .Values.probes.startup }}
+          {{- if .enabled }}
+          # 10s x 180 = 30 minutes for the first start after an upgrade: the
+          # one-time database migration blocks before the server listens, and
+          # the readiness probe must not be the one that reports it.
+          startupProbe:
+            exec:
+              command: ["tuwunel", "--health-check"]
+            periodSeconds: {{ .periodSeconds }}
+            timeoutSeconds: {{ .timeoutSeconds }}
+            failureThreshold: {{ .failureThreshold }}
+            initialDelaySeconds: {{ .initialDelaySeconds }}
+          {{- end }}
+          {{- end }}
+          {{- with .Values.probes.readiness }}
+          {{- if .enabled }}
+          # `tuwunel --health-check` talks to the running server, so it only
+          # succeeds once that server is actually serving this configuration.
           readinessProbe:
-            # /_tuwunel/server_version answers in every configuration, while
-            # /_matrix/federation/v1/version returns 403 M_FORBIDDEN as soon as
-            # federation is disabled.
-            httpGet:
-              path: /_tuwunel/server_version
-              port: http
-            periodSeconds: 2
-            failureThreshold: 5
+            exec:
+              command: ["tuwunel", "--health-check"]
+            periodSeconds: {{ .periodSeconds }}
+            timeoutSeconds: {{ .timeoutSeconds }}
+            failureThreshold: {{ .failureThreshold }}
+            initialDelaySeconds: {{ .initialDelaySeconds }}
+          {{- end }}
+          {{- end }}
+          {{- with .Values.probes.liveness }}
+          {{- if .enabled }}
+          livenessProbe:
+            exec:
+              command: ["tuwunel", "--health-check"]
+            periodSeconds: {{ .periodSeconds }}
+            timeoutSeconds: {{ .timeoutSeconds }}
+            failureThreshold: {{ .failureThreshold }}
+            initialDelaySeconds: {{ .initialDelaySeconds }}
+          {{- end }}
+          {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+        {{- if .Values.backup.scheduled }}
+        - name: backup
+          image: "{{ .Values.busybox.image.repository }}:{{ .Values.busybox.image.tag }}"
+          imagePullPolicy: {{ .Values.busybox.image.pullPolicy }}
+          # crond runs in the foreground (no init/daemonize) with the crontab
+          # from the configmap; the schedule's job is a SIGUSR2 to the server,
+          # which runs admin_signal_execute - the same online backup as
+          # `!admin server backup-database`, just without an admin room.
+          command: ["crond"]
+          args: ["-f", "-l", "8", "-c", "/etc/crontabs"]
+          resources:
+            {{- toYaml .Values.backup.sidecar.resources | nindent 12 }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: backup-crontabs
+              mountPath: /etc/crontabs
+        {{- end }}
       nodeSelector:
         {{- toYaml .Values.nodeSelector | nindent 8 }}
       affinity:
@@ -156,3 +278,16 @@ spec:
           emptyDir: {}
         - name: tmp
           emptyDir: {}
+        {{- if .Values.backup.enabled }}
+        - name: backup
+          persistentVolumeClaim:
+            claimName: {{ .Values.backup.existingClaim | default (printf "%s-backup" (include "tuwunel.fullname" .)) }}
+        {{- end }}
+        {{- if .Values.backup.scheduled }}
+        - name: backup-crontabs
+          configMap:
+            name: {{ template "tuwunel.fullname" . }}-backup-crontabs
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}

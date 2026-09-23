@@ -1,0 +1,37 @@
+# Scenario: S3-backed media storage plus the online backup feature.
+#
+# The runtime job renders this fixture, substitutes the ${S3_*} placeholders in
+# the init container (their values come from the secret-sourced env vars it
+# fakes), starts the server, and then sends it SIGUSR2 from a sibling container
+# with a shared PID namespace - the server has to write a backup repository
+# under backup.path, which is what the scheduled sidecar does in a real cluster.
+server_name: matrix.ci.example
+
+envFromSecret:
+  S3_ACCESS_KEY: ci-secrets/s3-access-key
+  S3_SECRET_KEY: ci-secrets/s3-secret-key
+
+config:
+  global:
+    allow_federation: false
+    ip_source: rightmost_x_forwarded_for
+    ip_source_trusted_subnets:
+      - 10.42.0.0/16
+    media_storage_providers:
+      - media_on_s3
+    storage_provider:
+      media_on_s3:
+        s3:
+          endpoint: https://s3.ci.example
+          bucket: tuwunel-ci-media
+          region: us-east-1
+          key: "${S3_ACCESS_KEY}"
+          secret: "${S3_SECRET_KEY}"
+          # No bucket exists behind that endpoint in CI, and the default
+          # startup_check pings the bucket and aborts startup when it fails.
+          startup_check: false
+
+backup:
+  enabled: true
+  scheduled: true
+  size: 1Gi
