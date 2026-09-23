@@ -1,3 +1,6 @@
 .tmp
 output
 *.tgz
+.DS_Store
+.cr-release-packages/
+.cr-index/

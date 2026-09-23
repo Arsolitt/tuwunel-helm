@@ -21,3 +21,6 @@
 *.tmproj
 # OWNERS file for Kubernetes
 OWNERS
+
+# CI value fixtures - used by .github/workflows/ci.yaml, never shipped
+ci/

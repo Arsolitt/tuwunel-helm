@@ -1,0 +1,180 @@
+# Single pipeline for the chart: quality gate on pull requests, release on main.
+#
+# Job ids are the status-check contexts (`lint`, `schema`, `release`); only the
+# first two are meant to be required on pull requests. There is deliberately no
+# `paths:` filter on `pull_request` - a job skipped by a path filter never
+# reports a status, so requiring it would block every merge that does not touch
+# those paths.
+#
+# Tool pins live in `env:` below; Dependabot keeps the actions themselves fresh.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # One pin per tool, no `@latest` anywhere; Dependabot bumps the actions below.
+  HELM_VERSION: 4.3.0
+  KUBECONFORM_VERSION: v0.8.0
+  KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+  CHART_RELEASER_VERSION: v1.8.1
+  # Oldest and newest Kubernetes releases the rendered manifests are checked
+  # against. kubeconform fetches these schemas from yannh/kubernetes-json-schema.
+  KUBERNETES_VERSIONS: 1.31.0 1.37.0
+  CHART_DIR: charts/tuwunel
+
+jobs:
+  lint:
+    name: Lint and validate manifests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install kubeconform
+        run: |
+          curl -fsSLo /tmp/kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  /tmp/kubeconform.tar.gz" | sha256sum -c -
+          sudo tar -xzf /tmp/kubeconform.tar.gz -C /usr/local/bin kubeconform
+          helm version --short
+          kubeconform -v
+
+      # values.schema.json is applied by every helm command, so lint failures
+      # here cover both template shape and chart-level value validation.
+      - name: helm lint
+        run: |
+          set -euo pipefail
+          helm lint --strict "$CHART_DIR"
+          for values in "$CHART_DIR"/ci/*-values.yaml; do
+            echo "::group::helm lint --strict -f $values"
+            helm lint --strict "$CHART_DIR" -f "$values"
+            echo "::endgroup::"
+          done
+
+      - name: Render and check against Kubernetes schemas
+        run: |
+          set -euo pipefail
+          manifest="${RUNNER_TEMP}/tuwunel-manifests.yaml"
+          for values in "$CHART_DIR"/ci/*-values.yaml; do
+            for k8s in $KUBERNETES_VERSIONS; do
+              echo "::group::$(basename "$values") on Kubernetes $k8s"
+              # Render to a .yaml file before validating: kubeconform keys off
+              # the file extension, and input it does not recognise is reported
+              # as "0 resource found" with exit code 0 - a silent no-op.
+              helm template ci "$CHART_DIR" -f "$values" > "$manifest"
+              expected=$(grep -c '^kind:' "$manifest" || true)
+              if [ "$expected" -eq 0 ]; then
+                echo "::error file=$values::$values rendered no resources"
+                exit 1
+              fi
+              summary=$(kubeconform -strict -summary -kubernetes-version "$k8s" "$manifest")
+              echo "$summary"
+              if ! grep -qE "Summary: $expected resources? found" <<<"$summary"; then
+                echo "::error file=$values::kubeconform validated an unexpected number of resources (rendered $expected)"
+                exit 1
+              fi
+              echo "::endgroup::"
+            done
+          done
+
+  schema:
+    name: Value schema guardrails
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      # The schema is only worth having if it still refuses impossible values:
+      # weakening it (or dropping it) has to break this job, not pass silently.
+      - name: Impossible values must be rejected
+        run: |
+          set -euo pipefail
+          status=0
+          for values in "$CHART_DIR"/ci/invalid/*.yaml; do
+            if out=$(helm template ci "$CHART_DIR" -f "$values" 2>&1); then
+              echo "::error file=$values::$values was accepted, but it must be rejected by $CHART_DIR/values.schema.json"
+              status=1
+            elif ! grep -qi schema <<<"$out"; then
+              echo "::error file=$values::$values failed for an unexpected reason (not schema validation):"
+              echo "$out"
+              status=1
+            else
+              echo "rejected as expected: $values"
+            fi
+          done
+          exit $status
+
+      - name: Supported value shapes must keep working
+        run: |
+          set -euo pipefail
+          for values in "$CHART_DIR"/ci/*-values.yaml; do
+            helm template ci "$CHART_DIR" -f "$values" > /dev/null
+            echo "rendered: $values"
+          done
+
+  release:
+    name: Release chart
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [lint, schema]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      # Packages every chart whose version is not released yet, creates the
+      # `<chart>-<version>` tag and GitHub release, and updates the index.yaml
+      # published by the gh-pages branch. A chart version that is already
+      # released is skipped, so doc-only merges are a no-op.
+      - name: Run chart-releaser
+        id: release
+        uses: helm/chart-releaser-action@v1.7.0
+        with:
+          version: ${{ env.CHART_RELEASER_VERSION }}
+          skip_existing: true
+        env:
+          CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summarize
+        env:
+          CHANGED_CHARTS: ${{ steps.release.outputs.changed_charts }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Chart release"
+            if [ -n "$CHANGED_CHARTS" ]; then
+              echo "Published: \`${CHANGED_CHARTS}\`"
+            else
+              echo "No chart version change detected - nothing was published."
+              echo "Bump \`version\` in \`${CHART_DIR}/Chart.yaml\` to publish a release."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
