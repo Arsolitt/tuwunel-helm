@@ -1,10 +1,10 @@
 # Single pipeline for the chart: quality gate on pull requests, release on main.
 #
-# Job ids are the status-check contexts (`lint`, `schema`, `release`); only the
-# first two are meant to be required on pull requests. There is deliberately no
-# `paths:` filter on `pull_request` - a job skipped by a path filter never
-# reports a status, so requiring it would block every merge that does not touch
-# those paths.
+# Job ids are the status-check contexts (`lint`, `schema`, `runtime`, `release`);
+# the first three are meant to be required on pull requests. There is
+# deliberately no `paths:` filter on `pull_request` - a job skipped by a path
+# filter never reports a status, so requiring it would block every merge that
+# does not touch those paths.
 #
 # Tool pins live in `env:` below; Dependabot keeps the actions themselves fresh.
 name: CI
@@ -133,10 +133,37 @@ jobs:
             echo "rendered: $values"
           done
 
+  # The other jobs only prove the manifests have the right *shape*. `helm lint`,
+  # `kubeconform` and `values.schema.json` never read the rendered config.toml,
+  # and no schema says anything about the readiness path - yet both decide
+  # whether tuwunel starts at all: a config value of the wrong TOML type
+  # (`allow_federation = "false"` instead of `= false`) makes the process exit 1
+  # at startup, and a path that answers 403 while federation is disabled leaves
+  # the pod permanently NotReady. This job is the only gate that starts the real
+  # image on every fixture and probes the exact path the readiness probe uses.
+  runtime:
+    name: Runtime smoke test against the real image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      # One container per fixture, started with the env vars and the config.toml
+      # of that fixture's own render; the container is removed after every
+      # fixture and by the trap, so a leak can never mask the next one.
+      - name: Start the image and probe the readiness path
+        run: hack/runtime-check.sh "$CHART_DIR"
+
   release:
     name: Release chart
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [lint, schema]
+    needs: [lint, schema, runtime]
     runs-on: ubuntu-latest
     permissions:
       contents: write

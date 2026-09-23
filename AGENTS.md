@@ -43,7 +43,15 @@ helm package charts/tuwunel
   versions in `env.KUBERNETES_VERSIONS`.
 - `schema` - asserts that `charts/tuwunel/ci/invalid/*.yaml` is still rejected **by the schema**
   (not by an unrelated template error) and that every supported scenario still renders.
-- `release` - `push` to `main` only, `needs: [lint, schema]`, runs `chart-releaser`. It packages
+- `runtime` - starts the real image once per `charts/tuwunel/ci/*-values.yaml` scenario with that
+  scenario's rendered env vars and a bind-mounted rendered `config.toml`, and polls the readiness
+  probe's port and path until it answers 200 (90 s per scenario; a container that exits by itself,
+  or a path that never returns 200, fails with the container's `docker logs`). It is the only job
+  that can see a config value written with the wrong TOML type (`allow_federation = "false"` makes
+  tuwunel exit 1 at startup) or a readiness path that answers 403 in the default
+  federation-disabled configuration; the other jobs check manifest shape only and never read the
+  rendered config file.
+- `release` - `push` to `main` only, `needs: [lint, schema, runtime]`, runs `chart-releaser`. It packages
   charts whose `version` is not released yet, creates the `tuwunel-<version>` tag and GitHub
   release, and updates `index.yaml` on `gh-pages`. Unchanged versions are skipped, so a
   documentation-only merge publishes nothing.

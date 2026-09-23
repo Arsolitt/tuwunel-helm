@@ -105,10 +105,12 @@ and CI changes are safe. Only stable versions are published - there is no
 pre-release channel.
 
 Every pull request runs `lint` (Helm 4 pinned, `helm lint --strict` plus
-`kubeconform` over the scenario values in [`charts/tuwunel/ci/`](charts/tuwunel/ci))
-and `schema` (the value schema must still reject the fixtures in
-[`charts/tuwunel/ci/invalid/`](charts/tuwunel/ci/invalid)). Both jobs run before
-the release job and are the ones worth marking as required checks.
+`kubeconform` over the scenario values in [`charts/tuwunel/ci/`](charts/tuwunel/ci)),
+`schema` (the value schema must still reject the fixtures in
+[`charts/tuwunel/ci/invalid/`](charts/tuwunel/ci/invalid)) and `runtime`
+([`hack/runtime-check.sh`](hack/runtime-check.sh) starts the real image once per
+scenario and probes the readiness path). All three jobs run before the release
+job and are the ones worth marking as required checks.
 
 ## Development
 
@@ -129,6 +131,9 @@ helm template ci charts/tuwunel --set server_name=matrix.example.org \
 for f in charts/tuwunel/ci/invalid/*.yaml; do
   helm template ci charts/tuwunel -f "$f" > /dev/null && echo "unexpectedly accepted: $f"
 done
+
+# Start the real image per scenario and probe the readiness path (needs docker)
+hack/runtime-check.sh
 ```
 
 ## License
