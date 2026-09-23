@@ -9,14 +9,20 @@ Helm chart for deploying [Tuwunel](https://github.com/matrix-construct/tuwunel),
 ## Build/Lint/Test Commands
 
 ```bash
-# Lint charts
-helm lint --quiet charts/tuwunel
+# Lint charts (also validates values against charts/tuwunel/values.schema.json)
+helm lint --strict charts/tuwunel
+
+# Every supported scenario must render - these are the files CI validates
+for f in charts/tuwunel/ci/*-values.yaml; do helm template ci charts/tuwunel -f "$f" > /dev/null; done
+
+# The schema must reject these
+for f in charts/tuwunel/ci/invalid/*.yaml; do helm template ci charts/tuwunel -f "$f" > /dev/null && echo "accepted: $f"; done
 
 # Template charts (render YAML)
 helm template release-name charts/tuwunel --include-crds > output.yaml
 
-# Validate against Kubernetes schemas
-helm template x charts/tuwunel --include-crds | kubeconform -summary -strict -ignore-missing-schemas -kubernetes-version=1.31.0
+# Validate against Kubernetes schemas (CI checks 1.31.0 and the newest release)
+helm template x charts/tuwunel --include-crds | kubeconform -summary -strict -kubernetes-version=1.31.0
 
 # Update dependencies
 helm dep up charts/tuwunel
@@ -27,6 +33,30 @@ helm install test-release charts/tuwunel --set server_name=test.example.com --dr
 # Package chart
 helm package charts/tuwunel
 ```
+
+## CI and Releases
+
+`.github/workflows/ci.yaml` is the only pipeline; job ids double as status-check contexts.
+
+- `lint` - `helm lint --strict` for the chart defaults and every `charts/tuwunel/ci/*-values.yaml`
+  scenario, then `helm template` + `kubeconform -strict` for each scenario on the Kubernetes
+  versions in `env.KUBERNETES_VERSIONS`.
+- `schema` - asserts that `charts/tuwunel/ci/invalid/*.yaml` is still rejected **by the schema**
+  (not by an unrelated template error) and that every supported scenario still renders.
+- `release` - `push` to `main` only, `needs: [lint, schema]`, runs `chart-releaser`. It packages
+  charts whose `version` is not released yet, creates the `tuwunel-<version>` tag and GitHub
+  release, and updates `index.yaml` on `gh-pages`. Unchanged versions are skipped, so a
+  documentation-only merge publishes nothing.
+
+Rules that keep this honest:
+
+- Tool pins live in the workflow `env:` block (Helm, kubeconform + its sha256, chart-releaser,
+  Kubernetes versions). Nothing uses `@latest`; Dependabot bumps the actions.
+- Adding a value means touching three places: `values.yaml`, `values.schema.json`, and the value
+  tables in `charts/tuwunel/README.md`.
+- `charts/tuwunel/.helmignore` excludes `ci/`; scenario and invalid fixtures never ship.
+- There is no `paths:` filter on `pull_request` - a job skipped by a filter never reports a
+  status, which would deadlock a future required check.
 
 ## Code Style Guidelines
 
@@ -130,7 +160,9 @@ Three patterns:
 charts/tuwunel/
 ├── Chart.yaml              # Chart metadata
 ├── values.yaml             # Default configuration
+├── values.schema.json      # Value validation, enforced by CI
 ├── README.md               # Documentation
+├── ci/                     # CI value fixtures (*-values.yaml, invalid/)
 ├── templates/
 │   ├── _helpers.tpl        # Reusable functions
 │   ├── NOTES.txt           # Post-install notes
@@ -149,7 +181,8 @@ charts/tuwunel/
 
 1. Increment `version` in `charts/tuwunel/Chart.yaml`
 2. Update `appVersion` if application version changes
-3. Release workflow auto-publishes to GitHub Pages
+3. Merge to `main` - the `release` job in `.github/workflows/ci.yaml` publishes to GitHub Releases
+   and GitHub Pages whenever the version is not released yet
 
 ## Common Tasks
 
@@ -157,8 +190,11 @@ charts/tuwunel/
 
 1. Add to `values.yaml` with comment and default
 2. Reference in template
-3. Update `charts/tuwunel/README.md`
-4. Test with `helm template`
+3. Cover the key in `values.schema.json` (and add a `ci/invalid/` fixture if the key has a shape
+   that must be rejected)
+4. Update `charts/tuwunel/README.md`
+5. Test with `helm template`, or add a scenario under `charts/tuwunel/ci/` when the combination of
+   values deserves permanent coverage
 
 ### Adding Optional Component
 
