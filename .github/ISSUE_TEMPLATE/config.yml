@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Chart repository and install instructions
+    url: https://arsolitt.github.io/tuwunel-helm
+    about: Index of published chart versions and the values reference.
+  - name: Tuwunel homeserver issues
+    url: https://github.com/matrix-construct/tuwunel/issues
+    about: Bugs in the homeserver itself (federation, rooms, database) belong upstream.

@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest a new value, component or behaviour for the chart
+title: "[Feature] "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is missing
+      description: Which use case is not covered today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: |
+        Sketch the values you would like to set, if you have something in mind.
+      render: yaml
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you tried, or other charts that solve this.
+    validations:
+      required: false

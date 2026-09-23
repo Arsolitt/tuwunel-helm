@@ -1,0 +1,92 @@
+name: Bug report
+description: Something in the chart renders or deploys incorrectly
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem. Issues about the
+        homeserver itself (crashes, federation, registration) belong in
+        [tuwunel](https://github.com/matrix-construct/tuwunel/issues) instead -
+        please keep this form for chart behaviour: rendering, values, probes,
+        ingress and the optional RTC components.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happens
+      description: What did you expect, and what happened instead?
+      placeholder: The pod never becomes ready, `kubectl get pod` shows ...
+    validations:
+      required: true
+
+  - type: input
+    id: chart-version
+    attributes:
+      label: Chart version
+      description: From `helm list -n <namespace>` (CHART column) or the release tag.
+      placeholder: tuwunel-1.0.3
+    validations:
+      required: true
+
+  - type: input
+    id: helm-version
+    attributes:
+      label: Helm version
+      description: Output of `helm version --short`.
+      placeholder: v4.2.4+g3900f43
+    validations:
+      required: true
+
+  - type: input
+    id: k8s-version
+    attributes:
+      label: Kubernetes version and distribution
+      description: Output of `kubectl version`, plus the distro (k3s, EKS, kind, kubeadm, ...).
+      placeholder: v1.33.4, k3s
+    validations:
+      required: true
+
+  - type: textarea
+    id: values
+    attributes:
+      label: Values used
+      description: |
+        Output of `helm get values <release> -n <namespace>`, or your values
+        file. Remove secrets (registration tokens, LiveKit credentials, ...).
+      render: yaml
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Pod and installer output
+      description: |
+        `kubectl describe pod <pod> -n <namespace>` and
+        `kubectl logs <pod> -n <namespace> [-c config-processor]`.
+      render: console
+    validations:
+      required: false
+
+  - type: dropdown
+    id: rtc
+    attributes:
+      label: Is Matrix RTC (LiveKit) enabled?
+      options:
+        - "No"
+        - "Yes"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How is the chart deployed?
+      options:
+        - Helm CLI
+        - Flux
+        - Argo CD
+        - Other
+    validations:
+      required: true
