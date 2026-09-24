@@ -18,7 +18,7 @@
 
 ## What the RTC option deploys
 
-`rtc.enabled: true` adds a MatrixRTC focus next to the homeserver: the LiveKit SFU carries media, and `lk-jwt-service` mints LiveKit access tokens and serves the HTTP endpoints clients call. Every template under `rtc/` is gated by `rtc.enabled`, and the values schema requires `rtc.domain` (non-empty) whenever it is true — the domain is what `LIVEKIT_URL`, the RTC route host and the homeserver's discovery record are built from.
+`rtc.enabled: true` adds a MatrixRTC focus next to the homeserver: the LiveKit SFU carries media, and `lk-jwt-service` mints LiveKit access tokens and serves the HTTP endpoints clients call. Every template under `rtc/` is gated by `rtc.enabled`, and the values schema requires `rtc.domain` whenever it is true, as a non-empty bare lowercase DNS name: the domain is what `LIVEKIT_URL`, the RTC route host and the homeserver's discovery record are built from, and the chart adds the `https://`/`wss://` part itself ([Prerequisites](#2-rtcdomain-and-dns)).
 
 Throughout this page `<fullname>` is `fullnameOverride` when set, otherwise the release name if it contains `tuwunel`, otherwise `<release>-tuwunel`. A release named `matrix` therefore renders `matrix-tuwunel-jwt`, `matrix-tuwunel-livekit`, and so on.
 
@@ -91,7 +91,15 @@ The secret name is yours to choose; both maps must point at the same `LIVEKIT_KE
 
 ### 2. `rtc.domain` and DNS
 
-`rtc.domain` is the host clients reach the focus on, and it is not the homeserver host. Where it has to point depends on the network mode:
+`rtc.domain` is the host clients reach the focus on, and it is not the homeserver host. It has to be a bare lowercase DNS name: the chart writes it verbatim into the RTC Ingress rule host and the RTC HTTPRoute hostname, and it prefixes the scheme itself — `https://<rtc.domain>` for the `livekit_url` it injects into `config.toml`, `wss://<rtc.domain>` for the derived `LIVEKIT_URL`. A scheme in the value is what used to render `https://https://rtc.ci.example` (and `wss://wss://…` on the JWT side) next to a host the API server refuses, so the schema's enabled branch pins the value to `^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$` — a scheme, a port, uppercase and underscores are all rejected before any template runs:
+
+```text
+Error: values don't meet the specifications of the schema(s) in the following chart(s):
+tuwunel:
+- at '/rtc/domain': 'https://rtc.ci.example' does not match pattern '^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'
+```
+
+The same render of `rtc.domain: "rtc.ci.example:8448"`, `"RTC.ci.example"` or `"rtc_ci.example"` fails on the same line with the value it read. Where the domain points depends on the network mode:
 
 | Mode | `rtc.domain` must resolve to |
 |---|---|
@@ -153,6 +161,8 @@ $ helm install matrix tuwunel/tuwunel -f values.yaml
 | `7880/tcp` | `rtc.livekit.config.port` | LiveKit HTTP API (also the Ingress catch-all backend) |
 | `7881/tcp` | `rtc.livekit.config.rtc.tcp_port` | RTC TCP |
 | `50100-50200/udp` | `rtc.livekit.config.rtc.port_range_start` / `port_range_end` | RTC UDP media |
+
+`rtc.livekit.config.port` is one value behind four manifests — the LiveKit container port, the port of `<fullname>-livekit`, and the backend port of the RTC Ingress and the RTC HTTPRoute — so it has to be a port number: digits only, and never empty. Both mistakes are refused at render time, before any of the four objects is written, with the messages quoted in [Troubleshooting](#troubleshooting).
 
 Point `rtc.domain` at that node's address, and pin the pod to that node with the placement knobs so the DNS record keeps matching — for example with Kubernetes' built-in `kubernetes.io/hostname` label, or whatever label your nodes carry:
 
@@ -378,7 +388,7 @@ The values this page uses, with their defaults from `charts/tuwunel/values.yaml`
 | Value | Default | Notes |
 |---|---|---|
 | `rtc.enabled` | `false` | master switch; all `rtc/*` templates |
-| `rtc.domain` | `""` | required (non-empty) when `rtc.enabled` is true |
+| `rtc.domain` | `""` | required when `rtc.enabled` is true; a bare lowercase DNS name, since the chart prefixes `https://`/`wss://` itself |
 | `rtc.jwt.image.repository` / `.tag` | `ghcr.io/element-hq/lk-jwt-service` / `0.7.0` | |
 | `rtc.jwt.env` / `.envRaw` / `.envFromSecret` | `{}` / `[]` / `{}` | `envFromSecret` format `secret/key` |
 | `rtc.jwt.resources` | `50m-200m` CPU, `128Mi-256Mi` memory | |
@@ -392,7 +402,7 @@ The values this page uses, with their defaults from `charts/tuwunel/values.yaml`
 | `rtc.livekit.gateway.udpRoute` / `.tcpRoute` | `false` / `false` | `pod` mode only |
 | `rtc.livekit.gateway.parentRefs` | `[]` | falls back to `gateway.parentRefs` |
 | `rtc.livekit.nodeSelector` / `.tolerations` / `.affinity` / `.podAnnotations` | `{}` / `[]` / `{}` / `{}` | where you pin LiveKit in `hostNetwork` mode |
-| `rtc.livekit.config.port` | `7880` | HTTP API; drives the container, Service, Ingress and HTTPRoute ports |
+| `rtc.livekit.config.port` | `7880` | HTTP API; digits only, and drives the container, Service, Ingress and HTTPRoute ports |
 | `rtc.livekit.config.rtc.tcp_port` | `7881` | `rtc-tcp` port when set |
 | `rtc.livekit.config.rtc.port_range_start` / `port_range_end` | `50100` / `50200` | hostNetwork media range; their presence without `udp_port` fails a `pod`-mode render |
 | `rtc.livekit.config.rtc.udp_port` | unset | single multiplexed UDP port; mandatory in `pod` mode |
@@ -427,6 +437,9 @@ Messages in this table are verbatim from `helm template`: schema rejections abor
 | `rtc.livekit.gateway.udpRoute needs parentRefs: set rtc.livekit.gateway.parentRefs, or gateway.parentRefs to share the homeserver's` | Media routes only fall back to `gateway.parentRefs` — a list set under `rtc.gateway.parentRefs` is not inherited | Set `rtc.livekit.gateway.parentRefs` or `gateway.parentRefs` |
 | `rtc.gateway.enabled needs parentRefs: set rtc.gateway.parentRefs, or gateway.parentRefs to share the homeserver's` | RTC HTTPRoute enabled with no parentRefs anywhere | Set one of the two lists; `gateway.enabled` is not required |
 | `at '/rtc/domain': minLength: got 0, want 1` | `rtc.enabled: true` with an empty `rtc.domain` | Set `rtc.domain` to the host clients use |
+| `at '/rtc/domain': 'https://rtc.ci.example' does not match pattern '^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'` | `rtc.domain` carries a scheme, a port, uppercase or an underscore. The pattern is the schema's enabled branch; the value is written verbatim into an Ingress/HTTPRoute host and the chart prefixes `https://`/`wss://` itself, so a scheme used to render `https://https://…` | Write the bare lowercase DNS name, without a scheme or a port — `rtc.ci.example` |
+| `rtc.livekit.config.port is empty: the LiveKit container port, this Service, the RTC Ingress and the RTC HTTPRoute are all built from rtc.livekit.config.port, so a release without it cannot be applied; set a port (the chart's default is 7880)` | `rtc.livekit.config.port` is `""`/null while one value has to fill the container, Service, Ingress and HTTPRoute ports — an empty one would render `port:`/`number:` (null) in all four | Give it a port number, or drop your `rtc.livekit.config` override so the `7880` default applies |
+| `rtc.livekit.config.port: "78x0" is not a port number - it has to be digits only, because the same value is rendered as the LiveKit container port, the port of ci-tuwunel-livekit and the backend port of the RTC Ingress and the RTC HTTPRoute` (rendered for a release named `ci`; `ci-tuwunel-livekit` is that release's `<fullname>-livekit`) | Same value, a non-numeric one (a range such as `"7880-7890"` lands here too) | Digits only — the media port *range* belongs under `rtc.livekit.config.rtc.port_range_start`/`port_range_end`, not in `port` |
 | `at '/rtc/livekit/networkMode': value must be one of 'hostNetwork', 'pod'` | A 1.x values file with `networkMode: bridge`, which was accepted and ignored before 2.0.0 | Delete the key or set `hostNetwork`/`pod` ([Upgrading](./upgrade.md)) |
 | `at '/rtc/ingress': additional properties 'path' not allowed` | A 1.x values file carrying `rtc.ingress.path` (or `extraHosts`) | Drop the key; the RTC path set is fixed |
 | Media never flows in `pod` mode although the Service exposes `rtc-udp` | The rendered `livekit.yaml` still carries `port_range_start`/`port_range_end` alongside `udp_port`; only the Deployment/Service ports collapse to the multiplexed port | Align the advertised candidates (`node_ip`/`use_external_ip`) and the range with what the Service actually forwards; the chart defines no LiveKit-side mapping from `udp_port` to the range |

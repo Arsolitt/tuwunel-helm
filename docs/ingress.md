@@ -106,7 +106,7 @@ ingress:
 | `ingress.class` | `""` | **Required whenever `enabled` is true** — see the refusal below |
 | `ingress.annotations` | `{}` | Merged into `metadata.annotations` verbatim; the chart adds none of its own |
 | `ingress.path` | `/` | The catch-all path; the schema requires a leading `/` |
-| `ingress.extraHosts` | `[]` | One extra rule (and one extra TLS host) per entry |
+| `ingress.extraHosts` | `[]` | One extra rule (and one extra TLS host) per entry; a trailing `:port` is stripped in the rendered host, a scheme is refused |
 | `ingress.tls` | `false` | Renders `spec.tls`; read [TLS](#tls) before enabling it |
 | `ingress.tlsSecretName` | `""` | Empty means `<fullname>-tls` |
 
@@ -144,7 +144,29 @@ spec:
                   number: 8080
 ```
 
-There is no `ingress.hosts` value. The host list is derived: `server_name` is always present, the delegated domain (from `config.global.well_known.server`, with a trailing `:port` stripped) takes over the catch-all rule when delegation is on, and every `ingress.extraHosts` entry gets a rule of its own. The values file states this directly: "Your server_name and delegated domain (if any) are already added to the Ingress".
+There is no `ingress.hosts` value. The host list is derived: `server_name` is always present, the delegated domain (from `config.global.well_known.server`) takes over the catch-all rule when delegation is on, and every `ingress.extraHosts` entry gets a rule of its own. The values file states this directly: "Your server_name and delegated domain (if any) are already added to the Ingress".
+
+Those values are Matrix names, not Kubernetes host fields, so each one is normalised by a single chart helper before it reaches a host. A trailing `:port` is stripped: Matrix allows `server_name: matrix.ci.example:8448` (see [Federation and delegation](./federation.md)) while `Ingress.spec.rules[].host`, `Ingress.spec.tls[].hosts[]` and `HTTPRoute.spec.hostnames[]` all take a bare hostname — a port would also end up in the certificate's SNI name. An `ingress.extraHosts` entry is treated the same way, and only the host field loses the port: `TUWUNEL_SERVER_NAME` and the rendered `config.toml` keep the configured value verbatim, so the Matrix identity does not change. `charts/tuwunel/ci/server-name-with-port-values.yaml` renders `server_name: matrix.ci.example:8448` with `extraHosts: [alias.ci.example:8443]` as:
+
+```yaml
+spec:
+  tls:
+    - hosts:
+        - matrix.ci.example
+        - alias.ci.example
+      secretName: ci-tuwunel-tls
+  rules:
+    - host: matrix.ci.example
+      # ...
+    - host: alias.ci.example
+      # ...
+```
+
+A scheme cannot be normalised that way, so it is refused instead: there is nothing to strip, and guessing the host behind `https://` would put a name in the manifest that appears nowhere in the values. The render fails naming the value and the label it came from — `server_name`, `ingress.extraHosts` or `gateway.hostnames` (a scheme in `config.global.well_known.server` is refused one step earlier, by the [ConfigMap guard](./troubleshooting.md#rejected-at-render-time-template-guards) that runs on every install, with its own message):
+
+```text
+Error: execution error at (tuwunel/templates/tuwunnel/ingress.yaml:8:23): server_name must be a bare hostname, not a URL: "https://matrix.ci.example"
+```
 
 > **Note:** With an empty `ingress.annotations` the template still emits an `annotations:` key with nothing under it, so the rendered manifest carries `metadata.annotations: null`. It is cosmetic, but it shows up in diffs.
 
@@ -156,7 +178,7 @@ There is no `ingress.hosts` value. The host list is derived: `server_name` is al
 2. the delegated domain derived from `config.global.well_known.server` — only when that block sets one,
 3. every `ingress.extraHosts` entry.
 
-The list is **not** deduplicated, so delegating to your own `server_name` renders that host twice. The secret name is `ingress.tlsSecretName`, or `<fullname>-tls` when the value is empty.
+All three are the normalised hosts from [What the chart renders](#what-the-chart-renders): a trailing `:port` is stripped from each of them, so no port reaches a host — or the certificate's SNI name — and a scheme fails the render. The list is **not** deduplicated, so delegating to your own `server_name` renders that host twice. The secret name is `ingress.tlsSecretName`, or `<fullname>-tls` when the value is empty.
 
 ```yaml
 ingress:
@@ -320,6 +342,7 @@ Creating the first account is a registration concern, not an ingress one — see
 | Symptom | Where to look |
 | --- | --- |
 | `helm install` aborts with "If ingress.enabled is set to true, ingress.class is required", or with the `config.global.port`/`server_name` equality message | [Rejected at render time (template guards)](./troubleshooting.md#rejected-at-render-time-template-guards) |
+| The render stops with `server_name must be a bare hostname, not a URL: "https://…"` (or the same sentence naming `ingress.extraHosts`/`gateway.hostnames`; a scheme in `config.global.well_known.server` is stopped by the ConfigMap guard instead, ingress or not) | [Rejected at render time (template guards)](./troubleshooting.md#rejected-at-render-time-template-guards) |
 | `service.type: ExternalName` is refused by the schema (`value must be one of 'ClusterIP', 'NodePort', 'LoadBalancer'`) | [Rejected before render (schema)](./troubleshooting.md#rejected-before-render-schema) |
 | Everything worked until delegation was switched on; now other endpoints on the apex host return no route / 404 | [Delegation narrowed the server_name host](./troubleshooting.md#delegation-narrowed-the-server-name-host) |
 | Requests fail with `500 M_UNKNOWN` / `Can't extract client IP from configured ip_source`, or every client has the same IP in the logs | [Client IP and ip_source](./troubleshooting.md#client-ip-and-ip_source) |

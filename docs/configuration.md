@@ -196,6 +196,24 @@ $ kubectl create secret generic tuwunel-secrets \
     --from-literal=REGISTRATION_TOKEN=...
 ```
 
+Every name in those four values is a container environment-variable name, and Kubernetes only
+accepts `^[-._a-zA-Z][-._a-zA-Z0-9]*$` — no leading digit, and nothing outside letters, digits,
+`-`, `_` and `.`. The schema checks all four positions (the keys of `env` and `envFromSecret`, the
+`name` of an `envRaw` entry, the `name` of an `extraEnv` entry), so a name the API server would
+refuse fails at `helm lint`/`helm template` time rather than at pod creation. `2FA_TOKEN` — a name
+starting with a digit — is the classic case:
+
+```text
+Error: values don't meet the specifications of the schema(s) in the following chart(s):
+tuwunel:
+- at '': invalid propertyName '2FA_TOKEN'
+  - at '': '2FA_TOKEN' does not match pattern '^[-._a-zA-Z][-._a-zA-Z0-9]*$'
+```
+
+The two list forms are reported against their own pointer instead, with the same sentence:
+`- at '/envRaw/0/name': '2FA_TOKEN' does not match pattern '^[-._a-zA-Z][-._a-zA-Z0-9]*$'`, and
+`- at '/extraEnv/0/name'` in place of `/envRaw/0/name` for an `extraEnv` entry.
+
 ### Variables the chart owns
 
 These are written on the server container by the chart. Do not set them yourself:
@@ -351,8 +369,11 @@ gate that reads the rendered configuration; see
 
 ### Keys with opposite shapes
 
-`config.global.well_known` has two neighbouring keys upstream gives deliberately different shapes,
-and the chart validates neither:
+`config.global.well_known` has two neighbouring keys upstream gives deliberately different shapes.
+The schema validates neither, but a `server` written as a URL never reaches the file: the render
+refuses it (see [Render-time guards](#render-time-guards)), because the key is the delegated domain
+upstream reads out of `config.toml` and there is nothing to normalise in a scheme. Only `client` is
+left entirely to the server:
 
 | Key | Required shape |
 | --- | --- |
@@ -395,6 +416,9 @@ likely to meet, with the exact message for each:
 | Below minimum | `backup.keep: 0` | `- at '/backup/keep': minimum: got 0, want 1` |
 | Bad pattern | `backup.schedule: "0 3 * *"` (four fields) | `- at '/backup/schedule': '0 3 * *' does not match pattern '^\\s*\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s*$'` |
 | Missing property | `rtc.enabled: true` without `rtc.domain` | `- at '/rtc/domain': minLength: got 0, want 1` |
+| Bad pattern | `env: {2FA_TOKEN: abc}` | `- at '': invalid propertyName '2FA_TOKEN'` (the next line spells the rule out: `  - at '': '2FA_TOKEN' does not match pattern '^[-._a-zA-Z][-._a-zA-Z0-9]*$'`) |
+| Below minimum | `image.tag: ""` | `- at '/image/tag': minLength: got 0, want 1` — an empty tag renders `ghcr.io/matrix-construct/tuwunel:`, an image reference the kubelet refuses as `InvalidImageName` |
+| Bad pattern | `rtc.domain: "https://rtc.ci.example"` | `- at '/rtc/domain': 'https://rtc.ci.example' does not match pattern '^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'` |
 | Bad enum | `rtc.livekit.networkMode: bridge` | `- at '/rtc/livekit/networkMode': value must be one of 'hostNetwork', 'pod'` |
 
 Three properties of this gate are worth remembering:
@@ -425,7 +449,11 @@ and only reaches the template's own guard — `You must set a server name otherw
 able to reach you` — when the schema is skipped (`--skip-schema-validation`).
 Both exist because an environment variable beats the configuration file, so a differing config value
 would be silently ignored — fix by deleting the duplicated key, not by changing the port. Other
-render guards cover the Gateway API and RTC media routes; the error text and their fix sites are in
+render guards cover the Gateway API, RTC media routes and the delegated domain: a
+`config.global.well_known.server` written as a URL, rather than the bare `host:port` upstream reads
+out of `config.toml`, is refused by the ConfigMap template on every install — the exposure templates
+refuse it too, but only when an Ingress or a Gateway renders it as a host field, whereas this guard
+does not depend on either. The error text and every fix site are in
 [Troubleshooting](./troubleshooting.md).
 
 Each rule has a fixture in the repo that CI renders and expects to fail: schema cases under

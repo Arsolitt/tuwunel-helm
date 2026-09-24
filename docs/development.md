@@ -33,7 +33,7 @@ tuwunel-helm/
 │   ├── values.schema.json         # applied by every helm command
 │   ├── README.md                  # canonical value reference; ships inside the packaged chart
 │   ├── .helmignore                # excludes ci/ - fixtures never ship
-│   ├── ci/                        # 30 fixtures: 12 scenarios, 13 invalid, 5 invalid-render
+│   ├── ci/                        # 38 fixtures: 13 scenarios, 17 invalid, 8 invalid-render
 │   └── templates/
 │       ├── _helpers.tpl           # named templates (labels, fullname, ...)
 │       ├── NOTES.txt              # post-install notes
@@ -62,9 +62,9 @@ Three folders, one meaning each. The folder is the contract: a fixture in the wr
 
 | Folder | What the fixture must do | Owning job | Count |
 |---|---|---|---|
-| `charts/tuwunel/ci/*-values.yaml` | render `helm template` **and** start its image | `lint`, `runtime` | 12 |
-| `charts/tuwunel/ci/invalid/*.yaml` | be rejected by `values.schema.json` | `schema` | 13 |
-| `charts/tuwunel/ci/invalid-render/*.yaml` | be rejected by a template `fail`, naming the value in its `# expect-error:` line | `schema` | 5 |
+| `charts/tuwunel/ci/*-values.yaml` | render `helm template` **and** start its image | `lint`, `runtime` | 13 |
+| `charts/tuwunel/ci/invalid/*.yaml` | be rejected by `values.schema.json` | `schema` | 17 |
+| `charts/tuwunel/ci/invalid-render/*.yaml` | be rejected by a template `fail`, naming the value in its `# expect-error:` line | `schema` | 8 |
 
 ### Scenarios - `charts/tuwunel/ci/*-values.yaml`
 
@@ -80,6 +80,7 @@ Three folders, one meaning each. The folder is the contract: a fixture in the wr
 | `rtc-pod-network-values.yaml` | LiveKit in pod network mode through a LoadBalancer: single `udp_port` and `externalTrafficPolicy: Local` |
 | `rtc-values.yaml` | RTC enabled with everything the chart derives left unset: no `well_known` block, no `LIVEKIT_URL` / `LIVEKIT_FULL_ACCESS_HOMESERVERS` / `LIVEKIT_JWT_BIND`, no `livekit.config.keys`, no `networkMode` |
 | `scheduled-backup-values.yaml` | Online backups with a per-minute schedule (`* * * * *`), so the runtime job starts the rendered sidecar and lets `crond` fire the job inside its wait window |
+| `server-name-with-port-values.yaml` | A Matrix server name that carries a port (`matrix.ci.example:8448`) on both exposure paths at once: the Ingress rules and TLS hosts plus the HTTPRoute hostnames are rendered without the port (the extra host `alias.ci.example:8443` and the gateway hostname `alt.ci.example` go through the same helper), while `TUWUNEL_SERVER_NAME` and `config.toml` keep the configured value |
 | `service-loadbalancer-values.yaml` | The homeserver Service published by a cloud load balancer: `service.type: LoadBalancer` plus `loadBalancerSourceRanges`, which must render without the headless `clusterIP` |
 | `storage-and-backup-values.yaml` | S3-backed media storage plus online backups on the default `0 3 * * *` schedule; the runtime job falls back to the crontab's own signal for this one and expects a backup repository under `backup.path` |
 
@@ -93,11 +94,15 @@ Two rules shape a scenario. It must render, and the `runtime` job starts its tuw
 | `backup-schedule-bad.yaml` | four-field cron `0 3 * *` in `backup.schedule` |
 | `config-quoted-boolean.yaml` | `config.global.allow_federation: "false"` |
 | `env-from-secret-without-key.yaml` | `envFromSecret` entry without the `secretName/key` form |
+| `env-name-invalid.yaml` | `env` key `2FA_TOKEN` - a container env name Kubernetes refuses (`^[-._a-zA-Z][-._a-zA-Z0-9]*$`), which would otherwise reach the API server |
 | `extra-env-without-value.yaml` | `extraEnv` entry lacking `value` |
 | `image-pull-policy.yaml` | `image.pullPolicy: Sometimes` |
+| `image-repository-empty.yaml` | `image.repository: ""` - an empty repository renders `:v1.9.2`, which the kubelet refuses as `InvalidImageName` |
+| `image-tag-empty.yaml` | `image.tag: ""` - the tag is rendered verbatim after the `:` separator, so an empty one renders `ghcr.io/matrix-construct/tuwunel:` |
 | `ip-source-typo.yaml` | `config.global.ip_source: xforwarded_for` |
 | `persistence-access-mode.yaml` | `persistence.data.accessMode: ReadWriteManyy` |
 | `resources-limits-null.yaml` | `resources.limits: null` |
+| `rtc-domain-with-scheme.yaml` | `rtc.domain: "https://rtc.ci.example"` - the value is prefixed into `https://`/`wss://` URLs and written into an Ingress/HTTPRoute host, so only a bare lowercase DNS name renders |
 | `rtc-enabled-without-domain.yaml` | `rtc.enabled: true` without `rtc.domain` |
 | `rtc-network-mode-invalid.yaml` | `rtc.livekit.networkMode: bridge` |
 | `service-type-externalname.yaml` | `service.type: ExternalName` - the chart renders no `externalName`, so the type leaves the schema enum |
@@ -112,8 +117,11 @@ Not every impossible value is a schema question. Rules that span two values belo
 | `backup-scheduled-without-enabled.yaml` | `backup.enabled` | the statefulset template - the sidecar and its crontab volume are gated on `backup.scheduled`, but the ConfigMap they mount belongs to the backups-enabled render |
 | `config-port-mismatch.yaml` | `config.global.port` | the statefulset template - it sets `TUWUNEL_PORT` from `service.port`, so an environment variable would win over the file and the server would listen on a port the values file does not name |
 | `gateway-without-parentrefs.yaml` | `gateway.enabled needs gateway.parentRefs` | the gateway HTTPRoute template - the chart renders routes that attach to a Gateway you run, it never creates one |
+| `host-with-scheme.yaml` | `must be a bare hostname` | the `tuwunel.host` helper - the host fields the chart renders (`server_name`, the delegated domain, `ingress.extraHosts`, `gateway.hostnames`) take a bare hostname, so a `://` in the value is refused rather than guessed away |
+| `rtc-livekit-port-empty.yaml` | `rtc.livekit.config.port` | the livekit service template - one value is the LiveKit container port, the Service port and the backend port of the RTC Ingress and the RTC HTTPRoute, and an empty one renders `port:`/`number:` (null) in all four |
 | `rtc-media-route-without-pod-mode.yaml` | `networkMode=pod` | the udproute template - in hostNetwork mode the media ports are node ports no Service fronts |
 | `rtc-pod-udp-range.yaml` | `rtc.livekit.config.rtc.udp_port` | the livekit service template - a Kubernetes Service cannot expose a UDP port range |
+| `well-known-server-with-scheme.yaml` | `config.global.well_known.server must be a bare host:port, not a URL` | the configmap template - the key is written into `config.toml` and served as `m.server`, so a URL is wrong however the release is exposed; the exposure templates refuse it only when they render it as a host field, and this fixture enables neither |
 
 ### Adding a fixture
 
@@ -198,7 +206,7 @@ $ helm package charts/tuwunel
 
 | Job | Name | Runs | Protects against |
 |---|---|---|---|
-| `lint` | Lint and validate manifests | `helm lint --strict` for the defaults and every scenario; `helm template` + `kubeconform -strict` for the **default values** and every scenario, on each version in `KUBERNETES_VERSIONS`; two assertions on the renders themselves - `Service types render an applyable clusterIP` (the headless default is kept, a LoadBalancer renders no `clusterIP`) and `Rendered host lists carry no empty entries` (every `spec.tls[].hosts[]`, `spec.rules[].host` and route `spec.hostnames[]` is a non-empty string) | a scenario that stops rendering, a manifest that violates the Kubernetes or Gateway API schemas, and the two combinations no schema can see: `clusterIP: "None"` is legal on a ClusterIP Service only, and kubeconform's Ingress schema accepts an empty host that the API server refuses |
+| `lint` | Lint and validate manifests | `helm lint --strict` for the defaults and every scenario; `helm template` + `kubeconform -strict` for the **default values** and every scenario, on each version in `KUBERNETES_VERSIONS`; two assertions on the renders themselves - `Service types render an applyable clusterIP` (the headless default is kept, a LoadBalancer renders no `clusterIP`) and `Rendered host lists carry no empty entries` (every `spec.tls[].hosts[]`, `spec.rules[].host` and route `spec.hostnames[]` has to be a host the API server accepts - an RFC 1123 subdomain, optionally `*.`-prefixed - so an empty entry, a port or a scheme in any rendered host fails the step; it runs over the default values and every scenario) | a scenario that stops rendering, a manifest that violates the Kubernetes or Gateway API schemas, and the two combinations no schema can see: `clusterIP: "None"` is legal on a ClusterIP Service only, and kubeconform's Ingress schema accepts an empty host that the API server refuses |
 | `schema` | Value schema guardrails | every `ci/invalid/*.yaml` must be refused by the schema; every `ci/invalid-render/*.yaml` must be refused by a template and name its value; every scenario must still render | a weakened `values.schema.json` or a dropped template guard |
 | `runtime` | Runtime smoke test against the real image | checkout, the pinned Helm, then `hack/runtime-check.sh "$CHART_DIR"` (`timeout-minutes: 25`) | a config value of the wrong TOML type and a readiness path that answers non-200 - neither is visible to the shape-only jobs; for a schedule that can fire inside the wait window it also starts the rendered backup sidecar, so a sidecar whose job `crond` cannot start fails here |
 | `release` | Release chart | chart-releaser, then `gh release edit` with the CHANGELOG section | an unpublished version bump and a release body that stayed the chart description |
