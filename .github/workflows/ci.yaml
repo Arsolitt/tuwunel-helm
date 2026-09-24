@@ -150,6 +150,84 @@ jobs:
             validate "$(basename "$values")" -f "$values"
           done
 
+      # kubeconform cannot see this defect: `service.type: LoadBalancer` and the
+      # default `clusterIP: None` are each schema-valid, and only the
+      # combination is impossible (`None` is legal on a ClusterIP Service only -
+      # an unconditional render makes LoadBalancer/NodePort unapplyable), so the
+      # combination is asserted on the render. The headless default is asserted
+      # with it: it is what the StatefulSet needs, so a condition that dropped
+      # the field everywhere would have to fail here.
+      - name: Service types render an applyable clusterIP
+        run: |
+          set -euo pipefail
+          headless="${RUNNER_TEMP}/tuwunel-service-headless.yaml"
+          balancer="${RUNNER_TEMP}/tuwunel-service-loadbalancer.yaml"
+          helm template ci "$CHART_DIR" > "$headless"
+          helm template ci "$CHART_DIR" -f "$CHART_DIR/ci/service-loadbalancer-values.yaml" > "$balancer"
+          if ! grep -q '^  clusterIP: "None"$' "$headless"; then
+            echo "::error::the default render lost the headless clusterIP the StatefulSet needs"
+            exit 1
+          fi
+          if grep -q '^  clusterIP:' "$balancer"; then
+            echo "::error::a LoadBalancer Service rendered a clusterIP, which the API server only accepts as 'None' on a ClusterIP Service"
+            exit 1
+          fi
+          if ! grep -q '^  type: LoadBalancer$' "$balancer"; then
+            echo "::error::service-loadbalancer-values.yaml did not render type: LoadBalancer"
+            exit 1
+          fi
+          echo "headless default kept; the LoadBalancer render has no clusterIP"
+
+      # kubeconform cannot see an empty host either: the schema types every
+      # entry as a string, and the render's bare `- ` becomes null - which the
+      # API server refuses (`spec.tls[0].hosts[1]: Invalid value: ""`). The
+      # host lists the templates build from values are parsed out of the render
+      # and required to hold non-empty names, so a condition that lets an unset
+      # value through has to fail here.
+      - name: Rendered host lists carry no empty entries
+        run: |
+          set -euo pipefail
+          manifest="${RUNNER_TEMP}/tuwunel-hosts.yaml"
+          check() {
+            local label="$1"
+            shift
+            helm template ci "$CHART_DIR" "$@" > "$manifest"
+            python3 - "$manifest" "$label" <<'PY'
+          import sys
+          import yaml
+
+          path, label = sys.argv[1], sys.argv[2]
+          empty = []
+          for doc in yaml.safe_load_all(open(path)):
+              if not isinstance(doc, dict):
+                  continue
+              name = (doc.get("metadata") or {}).get("name", "?")
+              kind, spec = doc.get("kind"), doc.get("spec") or {}
+              if kind == "Ingress":
+                  for i, tls in enumerate(spec.get("tls") or []):
+                      for j, host in enumerate((tls or {}).get("hosts") or []):
+                          if not isinstance(host, str) or not host.strip():
+                              empty.append(f"{label}: Ingress/{name} spec.tls[{i}].hosts[{j}]")
+                  for i, rule in enumerate(spec.get("rules") or []):
+                      host = (rule or {}).get("host")
+                      if host is not None and not str(host).strip():
+                          empty.append(f"{label}: Ingress/{name} spec.rules[{i}].host")
+              elif kind in ("HTTPRoute", "UDPRoute", "TCPRoute"):
+                  for j, host in enumerate(spec.get("hostnames") or []):
+                      if not isinstance(host, str) or not host.strip():
+                          empty.append(f"{label}: {kind}/{name} spec.hostnames[{j}]")
+          if empty:
+              for entry in empty:
+                  print(f"::error::an empty host is rendered where the API server requires a name - {entry}")
+              sys.exit(1)
+          PY
+          }
+          check "default values"
+          for values in "$CHART_DIR"/ci/*-values.yaml; do
+            check "$(basename "$values")" -f "$values"
+          done
+          echo "no empty hosts in any render"
+
   schema:
     name: Value schema guardrails
     runs-on: ubuntu-latest

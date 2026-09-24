@@ -29,10 +29,15 @@
 #   5. assert, in this order: the container is still running, the *rendered*
 #      probe command exits 0, and the rendered readiness URL answers 200;
 #   6. when the substituted config asks for online backups
-#      (database_backup_path + admin_signal_execute), run the crontab command
-#      the chart renders for the backup sidecar with a shared PID namespace and
-#      wait for the backup repository to appear - the SIGUSR2 path that
-#      `backup.scheduled` depends on.
+#      (database_backup_path + admin_signal_execute), drive the backup path the
+#      render describes: with a sidecar whose crontab fires inside the wait
+#      window, start *that* sidecar the way the manifest says - its image,
+#      command and args, its root user, its added capabilities and the crontab
+#      ConfigMap at its own mount path, sharing the server's PID namespace - and
+#      let crond fire the job on its own. Running the crontab's command by hand,
+#      which is all this gate used to do, is exactly what hides a sidecar that
+#      cannot start its own job. A schedule that cannot fire in time (say
+#      `0 3 * * *`) falls back to that single hand-run signal, and says so.
 #
 # A container that exits on its own is a failure of that fixture, never a slow
 # start.
@@ -67,13 +72,18 @@ endgroup() {
 
 # A failing fixture aborts the run: it prints the fixture, the image, the
 # assertion that failed and the server's own stderr, which is where a config
-# value of the wrong type or a failed bind shows up.
+# value of the wrong type or a failed bind shows up. A sidecar this run started
+# is part of the verdict too, so its state is printed as well.
 fail() {
   echo "::error file=$values::$values: $1"
   echo "FAIL $values $image -> $1"
   if [ -n "$container" ] && docker inspect "$container" >/dev/null 2>&1; then
     echo "--- $container (exit code $(docker inspect -f '{{.State.ExitCode}}' "$container")) ---"
     docker logs "$container" 2>&1 | tail -30 || true
+  fi
+  if [ -n "$backup_container" ] && docker inspect "$backup_container" >/dev/null 2>&1; then
+    echo "--- $backup_container (running: $(docker inspect -f '{{.State.Running}}' "$backup_container"), exit code $(docker inspect -f '{{.State.ExitCode}}' "$backup_container")) ---"
+    docker logs "$backup_container" 2>&1 | tail -20 || true
   fi
   exit 1
 }
@@ -84,7 +94,14 @@ fail() {
 shopt -s nullglob
 
 container=""
+backup_container=""
 cleanup() {
+  # The backup sidecar joins the server's PID namespace, so it is removed first
+  # (removing the server takes its dependents with it, but an explicit removal
+  # keeps this path free of daemon complaints).
+  if [ -n "$backup_container" ]; then
+    docker rm -f "$backup_container" >/dev/null 2>&1 || true
+  fi
   if [ -n "$container" ]; then
     docker rm -f "$container" >/dev/null 2>&1 || true
   fi
@@ -147,6 +164,7 @@ for values in "$chart_dir"/ci/*-values.yaml; do
   fixtures=$((fixtures + 1))
   index=$((index + 1))
   container="tuwunel-ci-${run_id}-${index}"
+  backup_container=""
   host_port=$(free_port $((18080 + index - 1)))
   work="${scratch_root}/tuwunel-runtime-${run_id}-${index}"
   rm -rf "$work"
@@ -407,13 +425,23 @@ PY
   fi
 
   # 2. The backup check is planned from the *substituted* config, so a
-  #    ${VAR} placeholder that changes the path is honoured.
-  python3 - "$work" "$work/substituted/$CONFIG_FILE" <<'PY'
+  #    ${VAR} placeholder that changes the path is honoured - and from the
+  #    render, so the sidecar this step drives is the sidecar the chart ships,
+  #    not a copy of its assumptions kept in this file.
+  #
+  #    crond only ever fires a job on a whole minute, so the window below has to
+  #    outlast a minute boundary and still leave room for the backup itself; the
+  #    same window decides whether the rendered schedule can produce evidence at
+  #    all, because a sidecar that would just idle is no evidence.
+  backup_window=90
+  python3 - "$work" "$work/substituted/$CONFIG_FILE" "$backup_window" <<'PY'
 import os, re, sys
+from datetime import datetime, timedelta, timezone
 from shlex import quote
 import yaml
 
-work, config_file = sys.argv[1:3]
+work, config_file, raw_window = sys.argv[1:4]
+window = int(raw_window)
 
 with open(config_file) as handle:
     text = handle.read()
@@ -445,6 +473,89 @@ def config_value(key, default=None):
     return default
 
 
+def cron_field(field, low, high):
+    """A single cron field as the set of values it allows, or None if unparsable."""
+    values = set()
+    for part in field.split(","):
+        step = 1
+        if "/" in part:
+            part, _, raw_step = part.partition("/")
+            if not raw_step.isdigit() or int(raw_step) < 1:
+                return None
+            step = int(raw_step)
+        if part in ("", "*"):
+            start, end = low, high
+        elif "-" in part:
+            raw_start, _, raw_end = part.partition("-")
+            if not (raw_start.isdigit() and raw_end.isdigit()):
+                return None
+            start, end = int(raw_start), int(raw_end)
+        elif part.isdigit():
+            start = end = int(part)
+        else:
+            return None
+        if start < low or end > high or start > end:
+            return None
+        values.update(range(start, end + 1, step))
+    return values
+
+
+def cron_matches(fields, moment):
+    """Whether a five-field crontab line fires in that minute."""
+    minute = cron_field(fields[0], 0, 59)
+    hour = cron_field(fields[1], 0, 23)
+    day = cron_field(fields[2], 1, 31)
+    month = cron_field(fields[3], 1, 12)
+    weekday = cron_field(fields[4], 0, 7)
+    if None in (minute, hour, day, month, weekday):
+        return False
+    if moment.minute not in minute or moment.hour not in hour or moment.month not in month:
+        return False
+    if 7 in weekday:  # cron takes 0 and 7 for Sunday
+        weekday = weekday | {0}
+    dom_set, dow_set = fields[2].strip() != "*", fields[4].strip() != "*"
+    dom_hit, dow_hit = moment.day in day, (moment.isoweekday() % 7) in weekday
+    if dom_set and dow_set:
+        # Vixie cron: when both day fields are restricted, either may match.
+        return dom_hit or dow_hit
+    return dom_hit and dow_hit
+
+
+def next_fire(now, schedule, window):
+    """Seconds until the schedule's next firing, or None when the next one is
+    further out than the window - crond only starts a job on a whole minute."""
+    fields = str(schedule).split()
+    if len(fields) != 5:
+        return None
+    candidate = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    for _ in range(0, window // 60 + 2):
+        seconds = (candidate - now).total_seconds()
+        if seconds > window:
+            return None
+        if cron_matches(fields, candidate):
+            return seconds
+        candidate += timedelta(minutes=1)
+    return None
+
+
+def crontab_job(content):
+    """The (schedule fields, command) of a crontab's first job line, or None."""
+    for raw in str(content).splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split()
+        if len(fields) < 6:
+            return None
+        return fields[:5], fields[5:]
+    return None
+
+
+def sh_array(name, items):
+    """A sourceable bash array assignment."""
+    return f"{name}=({' '.join(quote(str(item)) for item in items)})"
+
+
 backup_path = config_value("database_backup_path")
 signal_execute = config_value("admin_signal_execute")
 
@@ -455,32 +566,38 @@ if isinstance(backup_path, str) and backup_path.startswith("/") and signal_execu
     with open(os.path.join(work, "manifest.yaml")) as handle:
         docs = [doc for doc in yaml.safe_load_all(handle) if isinstance(doc, dict)]
 
-    # The command the chart's own crontab runs: the signal, with the schedule
-    # fields stripped off its line.
+    # The sidecar is the container that mounts a ConfigMap holding a cron job
+    # line, and that line names its spool file - everything out of the render,
+    # so a sidecar that cannot start its own job is driven as it is instead of
+    # as this script assumes it to be.
+    pod = {}
+    sidecar = crontab = None
+    spool_dir = spool_file = schedule = ""
     signal = []
-    for doc in docs:
-        if doc.get("kind") != "ConfigMap":
-            continue
-        root = (doc.get("data") or {}).get("root")
-        if not root:
-            continue
-        for raw in str(root).splitlines():
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            fields = line.split()
-            signal = fields[1:] if fields[0].startswith("@") else fields[5:]
-            break
-        if signal:
-            break
-
-    image = "busybox:1.37"
     for doc in docs:
         if doc.get("kind") != "StatefulSet":
             continue
-        for box in doc["spec"]["template"]["spec"].get("containers") or []:
-            if (box.get("command") or [None])[0] == "crond":
-                image = str(box.get("image"))
+        pod = doc["spec"]["template"]["spec"]
+        volumes = {v["name"]: v for v in pod.get("volumes") or []}
+        for box in pod.get("containers") or []:
+            for mount in box.get("volumeMounts") or []:
+                name = ((volumes.get(mount["name"]) or {}).get("configMap") or {}).get("name")
+                if not name:
+                    continue
+                for candidate in docs:
+                    if candidate.get("kind") != "ConfigMap":
+                        continue
+                    if candidate["metadata"]["name"] != name:
+                        continue
+                    for key, content in (candidate.get("data") or {}).items():
+                        if key.endswith(".toml"):
+                            continue
+                        job = crontab_job(content)
+                        if job is None:
+                            continue
+                        sidecar, crontab = box, candidate
+                        spool_dir, spool_file = mount["mountPath"], key
+                        schedule, signal = " ".join(job[0]), job[1]
 
     if not signal:
         # The crontab the chart renders for the sidecar; only used when the
@@ -488,20 +605,70 @@ if isinstance(backup_path, str) and backup_path.startswith("/") and signal_execu
         # backups anyway.
         signal = ["pkill", "-USR2", "-x", "tuwunel"]
 
+    # Identity and capabilities: the container's securityContext overrides the
+    # pod's, exactly like the API server merges the two.
+    security = dict(pod.get("securityContext") or {})
+    security.update(((sidecar or {}).get("securityContext") or {}))
+    user = ""
+    if security.get("runAsUser") is not None:
+        user = str(security["runAsUser"])
+        if security.get("runAsGroup") is not None:
+            user = f"{user}:{security['runAsGroup']}"
+    caps = [str(cap) for cap in ((security.get("capabilities") or {}).get("add") or [])]
+
+    # The manual signal the crontab's line runs is this check's fallback, and it
+    # keeps the crontab's own image; the sidecar is only started when its
+    # schedule can fire inside the window, because a sidecar that would idle
+    # proves nothing about the schedule and would slow every other fixture down.
+    image = str((sidecar or {}).get("image") or "busybox:1.37")
+    fallback = ""
+    if sidecar is None:
+        fallback = ("the render carries no backup sidecar, so the crontab's own "
+                    "command is run once")
+    elif next_fire(datetime.now(timezone.utc), schedule, window) is None:
+        # UTC because that is the clock the sidecar's own crond reads: the
+        # busybox image carries no tzdata and the pod sets no TZ.
+        fallback = (f"the rendered schedule '{schedule}' cannot fire within {window}s, "
+                    "so the sidecar would only idle and the crontab's own command "
+                    "is run once")
+    else:
+        # The crontab ConfigMap as a kubelet projects it: its keys as files in
+        # the directory the sidecar mounts.
+        source = os.path.join(work, "crontab-src")
+        os.makedirs(source, exist_ok=True)
+        with open(os.path.join(source, spool_file), "w") as handle:
+            handle.write(str(crontab["data"][spool_file]))
+
     if isinstance(signal_execute, list):
         signal_execute = " ".join(str(part) for part in signal_execute)
 
     lines.append(f"BACKUP_PATH={quote(backup_path)}")
     lines.append("BACKUP_SKIP=")
+    lines.append(f"BACKUP_FALLBACK={quote(fallback)}")
     lines.append(f"SIGNAL_IMAGE={quote(image)}")
     lines.append(f"SIGNAL_EXECUTE={quote(str(signal_execute))}")
-    lines.append("SIGNAL_CMD=(" + " ".join(quote(str(f)) for f in signal) + ")")
+    lines.append(sh_array("SIGNAL_CMD", signal))
+    lines.append(f"SIDECAR_IMAGE={quote(str((sidecar or {}).get('image') or ''))}")
+    lines.append(sh_array("SIDECAR_CMD", (sidecar or {}).get("command") or []))
+    lines.append(sh_array("SIDECAR_ARGS", (sidecar or {}).get("args") or []))
+    lines.append(f"SIDECAR_USER={quote(user)}")
+    lines.append(sh_array("SIDECAR_CAPS", caps))
+    lines.append(f"SIDECAR_SPOOL={quote(spool_dir)}")
+    lines.append(f"SIDECAR_SCHEDULE={quote(schedule)}")
 else:
     lines.append("BACKUP_PATH=")
     lines.append(f"BACKUP_SKIP={quote(skip)}")
+    lines.append("BACKUP_FALLBACK=")
     lines.append("SIGNAL_IMAGE='busybox:1.37'")
     lines.append("SIGNAL_EXECUTE=''")
     lines.append("SIGNAL_CMD=()")
+    lines.append("SIDECAR_IMAGE=''")
+    lines.append("SIDECAR_CMD=()")
+    lines.append("SIDECAR_ARGS=()")
+    lines.append("SIDECAR_USER=''")
+    lines.append("SIDECAR_CAPS=()")
+    lines.append("SIDECAR_SPOOL=''")
+    lines.append("SIDECAR_SCHEDULE=''")
 
 with open(os.path.join(work, "backup.sh"), "w") as handle:
     handle.write("\n".join(lines) + "\n")
@@ -607,13 +774,69 @@ PY
     sleep 1
   done
 
-  # 5. The online-backup path, only for a config that turns it on.
+  # 5. The online-backup path, only for a config that turns it on: the rendered
+  #    sidecar when its schedule fires inside the wait window, otherwise the
+  #    crontab's own command once.
   backup_evidence=""
+  backup_via=""
   if [ -n "$BACKUP_PATH" ]; then
-    echo "     backup $BACKUP_PATH via admin_signal_execute=$SIGNAL_EXECUTE; running ${SIGNAL_CMD[*]:-} from $SIGNAL_IMAGE"
-    docker run --rm --pid="container:$container" "$SIGNAL_IMAGE" \
-      ${SIGNAL_CMD[@]+"${SIGNAL_CMD[@]}"} \
-      || fail "the rendered crontab command (${SIGNAL_CMD[*]:-}) failed in the server's PID namespace"
+    if [ -n "$BACKUP_FALLBACK" ]; then
+      echo "     backup $BACKUP_PATH via admin_signal_execute=$SIGNAL_EXECUTE; $BACKUP_FALLBACK - running ${SIGNAL_CMD[*]:-} from $SIGNAL_IMAGE"
+      docker run --rm --pid="container:$container" "$SIGNAL_IMAGE" \
+        ${SIGNAL_CMD[@]+"${SIGNAL_CMD[@]}"} \
+        || fail "the rendered crontab command (${SIGNAL_CMD[*]:-}) failed in the server's PID namespace"
+      backup_via="the rendered crontab's signal"
+    else
+      # The crontab ConfigMap the way a kubelet projects it: its keys as files
+      # in the directory the sidecar mounts. crond ignores a spool file that is
+      # not owned by root, so the render's own image places them as root - a
+      # file written by the runner would make this check look, not test.
+      spool="$work/crontabs"
+      mkdir -p "$spool"
+      chmod 777 "$spool"
+      docker run --rm --user 0:0 --entrypoint sh \
+        -v "$work/crontab-src:/src:ro" -v "$spool:$SIDECAR_SPOOL" \
+        "$SIDECAR_IMAGE" -c 'for f in /src/*; do cp "$f" "$1"/; done' sh "$SIDECAR_SPOOL" \
+        || fail "the rendered crontab ConfigMap could not be projected into $SIDECAR_SPOOL"
+
+      # Capabilities the same way round as the manifest: every one dropped, the
+      # rendered few added back. Docker's default set has to go, or the sidecar
+      # under test would hold more power than the pod's.
+      cap_args=()
+      caps_text=""
+      for cap in ${SIDECAR_CAPS[@]+"${SIDECAR_CAPS[@]}"}; do
+        cap_args+=(--cap-add "$cap")
+        caps_text="${caps_text:+$caps_text }$cap"
+      done
+
+      sidecar_entrypoint=()
+      sidecar_argv=()
+      if [ "${#SIDECAR_CMD[@]}" -gt 0 ]; then
+        sidecar_entrypoint=(--entrypoint "${SIDECAR_CMD[0]}")
+        i=1
+        while [ "$i" -lt "${#SIDECAR_CMD[@]}" ]; do
+          sidecar_argv+=("${SIDECAR_CMD[$i]}")
+          i=$((i + 1))
+        done
+      fi
+      sidecar_argv+=( ${SIDECAR_ARGS[@]+"${SIDECAR_ARGS[@]}"} )
+
+      sidecar_user=()
+      if [ -n "$SIDECAR_USER" ]; then
+        sidecar_user=(--user "$SIDECAR_USER")
+      fi
+
+      echo "     backup $BACKUP_PATH via admin_signal_execute=$SIGNAL_EXECUTE; starting the rendered sidecar ($SIDECAR_IMAGE ${SIDECAR_CMD[*]:-} ${SIDECAR_ARGS[*]:-}, user=${SIDECAR_USER:-image default}, caps=${caps_text:-none}), schedule '$SIDECAR_SCHEDULE'"
+      backup_container="${container}-backup"
+      docker run -d --name "$backup_container" --pid="container:$container" \
+        ${sidecar_user[@]+"${sidecar_user[@]}"} \
+        --cap-drop ALL ${cap_args[@]+"${cap_args[@]}"} --read-only \
+        -v "$spool:$SIDECAR_SPOOL:ro" \
+        ${sidecar_entrypoint[@]+"${sidecar_entrypoint[@]}"} \
+        "$SIDECAR_IMAGE" ${sidecar_argv[@]+"${sidecar_argv[@]}"} >/dev/null \
+        || fail "the rendered backup sidecar could not be started from $SIDECAR_IMAGE"
+      backup_via="the rendered sidecar's job (schedule '$SIDECAR_SCHEDULE')"
+    fi
 
     backup_start=$SECONDS
     while :; do
@@ -628,9 +851,14 @@ PY
       if [ "$(docker inspect -f '{{.State.Running}}' "$container")" != "true" ]; then
         fail "the server died while handling the backup signal"
       fi
-      [ $((SECONDS - backup_start)) -lt 60 ] || fail "no backup repository (meta/) appeared under $BACKUP_PATH within 60s of the rendered crontab's signal"
+      [ $((SECONDS - backup_start)) -lt "$backup_window" ] || fail "no backup repository (meta/) appeared under $BACKUP_PATH within ${backup_window}s of $backup_via"
       sleep 1
     done
+    if [ -n "$backup_container" ]; then
+      # The verdict is in; the sidecar itself is no longer needed.
+      docker rm -f "$backup_container" >/dev/null
+      backup_container=""
+    fi
     backup_evidence=$(docker logs "$container" 2>&1 | grep -o 'Created database backup.*' | tail -1 || true)
     echo "     backup ok after $((SECONDS - backup_start))s: ${backup_evidence:-a backup repository exists under $BACKUP_PATH}"
   elif [ -n "$BACKUP_SKIP" ]; then
