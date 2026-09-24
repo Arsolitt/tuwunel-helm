@@ -1,0 +1,42 @@
+{{- if .Values.gateway.enabled -}}
+{{- $fullName := include "tuwunel.fullname" . -}}
+{{- $refs := .Values.gateway.parentRefs -}}
+{{- if not $refs -}}
+{{- fail "gateway.enabled needs gateway.parentRefs: the chart renders HTTPRoutes that attach to a Gateway you run, it does not create one" -}}
+{{- end -}}
+{{- /* The delegated host is derived the same way the Ingress derives it, but
+       defensively: `config: {}` is a valid values set, so a missing global or
+       well_known block must not abort the render. */}}
+{{- $wellKnown := (get (get .Values.config "global" | default dict) "well_known" | default dict) -}}
+{{- $delegated := get $wellKnown "server" -}}
+{{- if $delegated }}{{ $delegated = mustRegexReplaceAll ":[0-9]+" $delegated "" }}{{ end -}}
+{{- $hostnames := list .Values.server_name -}}
+{{- if $delegated }}{{ $hostnames = append $hostnames $delegated }}{{ end -}}
+{{- range .Values.gateway.hostnames }}{{ $hostnames = append $hostnames . }}{{ end -}}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "tuwunel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tuwunel
+  {{- with .Values.gateway.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- toYaml $refs | nindent 4 }}
+  hostnames:
+    {{- $hostnames | uniq | toYaml | nindent 4 }}
+  {{- /* One catch-all rule: unlike the Ingress, the delegated-domain host does
+         not need a separate path set - the server answers both itself. */}}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ $fullName }}
+          port: {{ .Values.service.port }}
+{{- end }}

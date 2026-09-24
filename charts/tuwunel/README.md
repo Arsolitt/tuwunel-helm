@@ -49,8 +49,8 @@ Breaking changes:
   mandatory `LIVEKIT_FULL_ACCESS_HOMESERVERS`) and LiveKit `v1.13.7`.
 
 Also new in this release: [online backups](#backups-and-recovery), [media storage providers
-(local and S3)](#media-storage-local-and-s3), [`ip_source`](#client-ip-behind-a-proxy), the
-`pod` network mode for LiveKit, and a `helm test` hook.
+(local and S3)](#media-storage-local-and-s3), [`ip_source`](#client-ip-behind-a-proxy),
+[Gateway API exposure](#gateway-api), the `pod` network mode for LiveKit, and a `helm test` hook.
 
 ## Configuration
 
@@ -197,6 +197,98 @@ being ignored (see [Upgrading to 2.0.0](#upgrading-to-200)).
 | `ingress.extraHosts`         | Additional hostnames                                  | `[]`          |
 | `ingress.tls`                | Whether to configure TLS for the ingress              | `false`       |
 | `ingress.tlsSecretName`      | TLS secret name (defaults to `<release-name>-tls`)    | `""`          |
+
+### Gateway API
+
+The chart can expose the homeserver through `gateway.networking.k8s.io` routes instead of an
+Ingress, or next to one. It renders `HTTPRoute` objects that attach to a `Gateway` you already run:
+the listeners, the TLS certificates and the addresses of that Gateway stay yours. As with
+`ingress.class` and an IngressClass, the chart never creates a `Gateway` or a `GatewayClass` -
+`parentRefs` name the Gateway your controller serves. Ingress and Gateway API may be enabled at the
+same time; they are served by different controllers, so running both is the supported state during
+a cutover.
+
+The homeserver route is named `<fullname>` and carries every hostname the server has to answer for:
+`server_name`, the delegated domain from `config.global.well_known.server` with its port stripped
+(the rule the Ingress already follows) and `gateway.hostnames`. A single catch-all `PathPrefix /`
+rule points at `<fullname>:service.port`; with both hostnames listed, one rule covers what the
+Ingress splits into separate path sets.
+
+| Parameter             | Description                                             | Default         |
+| --------------------- | ------------------------------------------------------- | --------------- |
+| `gateway.enabled`     | Render the homeserver `HTTPRoute`                       | `false`         |
+| `gateway.parentRefs`  | Gateways the route attaches to                          | `[]`            |
+| `gateway.hostnames`   | Additional hostnames for the route                      | `[]`            |
+| `gateway.annotations` | Annotations for the `HTTPRoute`                         | `{}`            |
+
+A `parentRefs` entry needs at least a `name`; `namespace` defaults to the release namespace when
+omitted and `sectionName` picks one listener of a multi-listener Gateway (TLS and hostname binding
+belong to that listener). `gateway.annotations` are written onto the `HTTPRoute`, for the
+controller-specific opt-ins a route may need.
+
+Enabling `gateway.enabled` without any `parentRefs` fails the render with
+`gateway.enabled needs gateway.parentRefs`: a route with an empty `parentRefs` list is valid for
+the CRD and would simply never be attached, so the chart refuses it instead.
+
+```yaml
+gateway:
+  enabled: true
+  parentRefs:
+    - name: eg
+      namespace: gateway-system
+    - name: eg
+      sectionName: https
+  hostnames:
+    - alias.example.com
+  annotations:
+    example.com/note: rendered
+```
+
+#### RTC on the Gateway API
+
+With `rtc.enabled` and `rtc.gateway.enabled` the chart renders a second `HTTPRoute`, named
+`<fullname>-rtc`, for `rtc.domain`: the JWT paths listed in [RTC ingress](#rtc-ingress) go to
+`<fullname>-jwt:8080` and everything else to `<fullname>-livekit:<rtc.livekit.config.port>` - the
+same routing table the RTC ingress uses. The route is rendered only when `rtc.enabled` is true,
+exactly like `rtc.ingress`; `gateway.enabled` is not required for it, but it needs
+`rtc.gateway.parentRefs` or the shared `gateway.parentRefs`, and a render with neither fails with a
+message naming `rtc.gateway.parentRefs`.
+
+| Parameter                 | Description                                             | Default |
+| ------------------------- | ------------------------------------------------------- | ------- |
+| `rtc.gateway.enabled`     | Render the RTC `HTTPRoute`                              | `false` |
+| `rtc.gateway.parentRefs`  | Gateways the RTC route attaches to                      | `[]`    |
+| `rtc.gateway.annotations` | Annotations for the RTC `HTTPRoute`                     | `{}`    |
+
+LiveKit's media is UDP and raw TCP, which an `HTTPRoute` cannot carry, so the chart renders a
+`UDPRoute` named `<fullname>-livekit-udp` and a `TCPRoute` named `<fullname>-livekit-tcp` - in
+`pod` mode only, because in the default `hostNetwork` mode the media ports are node ports on the
+node `rtc.domain` resolves to and no Service fronts them. A media route in `hostNetwork` mode fails
+the render with a message naming `rtc.livekit.networkMode`; with `networkMode: pod` the ports live
+on the Service in `rtc.livekit.service`, and the routes target `config.rtc.udp_port` and
+`config.rtc.tcp_port`. A route whose port is unset fails the render with a message naming that port
+value.
+
+| Parameter                         | Description                                             | Default |
+| --------------------------------- | ------------------------------------------------------- | ------- |
+| `rtc.livekit.gateway.udpRoute`    | Render a `UDPRoute` for `config.rtc.udp_port`           | `false` |
+| `rtc.livekit.gateway.tcpRoute`    | Render a `TCPRoute` for `config.rtc.tcp_port`           | `false` |
+| `rtc.livekit.gateway.parentRefs`  | Gateways the media routes attach to                     | `[]`    |
+| `rtc.livekit.gateway.annotations` | Annotations for the media routes                        | `{}`    |
+
+The media routes also need `rtc.enabled`, and `rtc.livekit.gateway.parentRefs` falls back to
+`gateway.parentRefs` - not to `rtc.gateway.parentRefs`, so a media-only configuration needs its own
+list or the shared one.
+
+Whether a `UDPRoute`/`TCPRoute` actually carries media depends on the Gateway implementation's data
+plane: HTTPRoute proxying is universally implemented, UDP/TCP proxying is not, so check your
+controller's conformance before relying on the media routes. The Service path needs no Gateway
+support at all and keeps working on any controller (or none).
+
+Gateway API versions: `HTTPRoute` and `Gateway` have been `v1` since Gateway API v1.0, but
+`UDPRoute` and `TCPRoute` only reach `v1` in **Gateway API v1.6** and are still absent from some
+vendor bundles. A cluster running an older bundle cannot serve the media routes, while the
+homeserver and RTC `HTTPRoute`s are unaffected.
 
 ### Persistence Configuration
 
@@ -599,6 +691,11 @@ one and is kept for clients that still call it. The annotations set on the ingre
 websocket/read-timeout ones plus `nginx.ingress.kubernetes.io/proxy-buffering: "off"`; your own
 `rtc.ingress.annotations` are applied last and win.
 
+The same host can be served by an `HTTPRoute` instead: `rtc.gateway.enabled` with
+`rtc.gateway.parentRefs`, and `rtc.livekit.gateway.udpRoute`/`tcpRoute` for the media ports in `pod`
+mode. The routing table and the JWT paths are identical in both cases - see
+[RTC on the Gateway API](#rtc-on-the-gateway-api).
+
 ### Network Modes
 
 `rtc.livekit.networkMode` chooses how media reaches the server:
@@ -659,6 +756,10 @@ TURN: pass an external TURN server through to clients with `rtc.livekit.config.r
 | `rtc.livekit.image.tag`                | LiveKit server image tag                              | `v1.13.7`                  |
 | `rtc.livekit.resources`                | LiveKit server resources                              | 50m-1/128Mi-1Gi            |
 | `rtc.livekit.networkMode`              | `hostNetwork` or `pod`                                | `hostNetwork`              |
+| `rtc.livekit.gateway.udpRoute`         | `UDPRoute` for `config.rtc.udp_port`                  | `false`                    |
+| `rtc.livekit.gateway.tcpRoute`         | `TCPRoute` for `config.rtc.tcp_port`                  | `false`                    |
+| `rtc.livekit.gateway.parentRefs`       | Gateways the media routes attach to                   | `[]`                       |
+| `rtc.livekit.gateway.annotations`      | Annotations for the media routes                      | `{}`                       |
 | `rtc.livekit.env`                      | LiveKit environment variables                         | `{}`                       |
 | `rtc.livekit.envRaw`                   | Raw environment variable sections                     | `[]`                       |
 | `rtc.livekit.envFromSecret`            | LiveKit env from secrets (needs `LIVEKIT_KEY`/`LIVEKIT_SECRET`) | `{}`              |
@@ -683,6 +784,9 @@ TURN: pass an external TURN server through to clients with `rtc.livekit.config.r
 | `rtc.ingress.annotations`              | Extra ingress annotations (applied last)              | `{}`                       |
 | `rtc.ingress.tls`                      | Enable TLS                                            | `false`                    |
 | `rtc.ingress.tlsSecretName`            | TLS secret name (defaults to `<release-name>-rtc-tls`) | `""`                      |
+| `rtc.gateway.enabled`                  | Enable the RTC HTTPRoute                              | `false`                    |
+| `rtc.gateway.parentRefs`               | Gateways the RTC route attaches to                    | `[]`                       |
+| `rtc.gateway.annotations`              | Annotations for the RTC HTTPRoute                     | `{}`                       |
 
 ### Deployment
 

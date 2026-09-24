@@ -1,0 +1,38 @@
+# Scenario: RTC media on the Gateway API, without a homeserver route.
+#
+# gateway.enabled stays false on purpose: the UDP/TCP media routes belong to
+# rtc.livekit and stand on their own. LiveKit runs in pod network mode, so the
+# Service forwards a single multiplexed UDP port (udp_port: 7882) next to the
+# TCP port (7881) - exactly the ports the routes have to target. Whether these
+# routes carry media depends on the Gateway implementation's data plane: nothing
+# in CI installs a Gateway controller.
+server_name: matrix.ci.example
+
+rtc:
+  enabled: true
+  domain: rtc.ci.example
+
+  jwt:
+    envFromSecret:
+      LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
+      LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
+
+  livekit:
+    networkMode: pod
+    envFromSecret:
+      LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
+      LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
+    service:
+      type: LoadBalancer
+    gateway:
+      udpRoute: true
+      tcpRoute: true
+      parentRefs:
+        - name: eg
+          namespace: gateway-system
+          sectionName: media
+      annotations:
+        ci.example/note: media
+    config:
+      rtc:
+        udp_port: 7882

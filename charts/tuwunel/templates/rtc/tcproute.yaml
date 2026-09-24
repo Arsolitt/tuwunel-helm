@@ -1,0 +1,32 @@
+{{- if and .Values.rtc.enabled .Values.rtc.livekit.gateway.tcpRoute -}}
+{{- $fullName := include "tuwunel.fullname" . -}}
+{{- if ne .Values.rtc.livekit.networkMode "pod" -}}
+{{- fail (printf "rtc.livekit.gateway.tcpRoute needs rtc.livekit.networkMode=pod (it is %q): with hostNetwork the media ports are node ports, and the Service exposes rtc-tcp only in pod mode" .Values.rtc.livekit.networkMode) -}}
+{{- end -}}
+{{- $port := (get (get .Values.rtc.livekit.config "rtc" | default dict) "tcp_port") -}}
+{{- if not $port -}}
+{{- fail "rtc.livekit.gateway.tcpRoute needs rtc.livekit.config.rtc.tcp_port: the Service exposes no rtc-tcp port without it" -}}
+{{- end -}}
+{{- $refs := .Values.rtc.livekit.gateway.parentRefs | default .Values.gateway.parentRefs -}}
+{{- if not $refs -}}
+{{- fail "rtc.livekit.gateway.tcpRoute needs parentRefs: set rtc.livekit.gateway.parentRefs, or gateway.parentRefs to share the homeserver's" -}}
+{{- end -}}
+apiVersion: gateway.networking.k8s.io/v1
+kind: TCPRoute
+metadata:
+  name: {{ $fullName }}-livekit-tcp
+  labels:
+    {{- include "tuwunel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rtc-livekit
+  {{- with .Values.rtc.livekit.gateway.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- toYaml $refs | nindent 4 }}
+  rules:
+    - backendRefs:
+        - name: {{ $fullName }}-livekit
+          port: {{ $port }}
+{{- end }}

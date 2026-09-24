@@ -228,6 +228,26 @@ ingress:
   ## TLS secret name (defaults to <release-name>-tls if not specified)
   tlsSecretName: ""
 
+## Gateway API exposure (gateway.networking.k8s.io), an alternative to `ingress`.
+## The chart renders HTTPRoute objects that attach to a Gateway you already run;
+## the Gateway itself - listeners, TLS, addresses - stays yours.
+gateway:
+  enabled: false
+  ## The Gateway(s) the routes attach to. `namespace` defaults to the release
+  ## namespace when omitted; `sectionName` picks one listener of a multi-listener
+  ## Gateway. TLS and hostname binding belong to that listener.
+  ## Example:
+  # parentRefs:
+  #   - name: eg
+  #     namespace: gateway-system
+  #     sectionName: https
+  parentRefs: []
+  ## Extra hostnames for the homeserver route. server_name is always added, plus
+  ## the delegated domain when config.global.well_known.server is set.
+  hostnames: []
+  ## Annotations for the HTTPRoute (controller-specific opt-ins, for example)
+  annotations: {}
+
 ## Persist configuration to a persistent volume
 persistence:
   ## Data Persistent Volume Storage Class
@@ -442,6 +462,20 @@ rtc:
     ##   the pod.
     networkMode: "hostNetwork"
 
+    ## Gateway API media routes, for networkMode: pod only - with hostNetwork the
+    ## media ports are node ports and no Service fronts them. Whether these work
+    ## depends on the Gateway implementation: HTTPRoute is universal, UDP/TCP
+    ## proxying is not (check your data plane's conformance), and the Service
+    ## from rtc.livekit.service keeps working regardless.
+    gateway:
+      ## UDPRoute for config.rtc.udp_port
+      udpRoute: false
+      ## TCPRoute for config.rtc.tcp_port
+      tcpRoute: false
+      ## Defaults to gateway.parentRefs when empty
+      parentRefs: []
+      annotations: {}
+
     podAnnotations: {}
     nodeSelector: {}
     tolerations: []
@@ -534,3 +568,10 @@ rtc:
     ## TLS secret name (defaults to <release-name>-rtc-tls)
     ## Required if tls is enabled
     tlsSecretName: ""
+
+  ## Gateway API route for the RTC host. Only rendered when rtc.enabled is true;
+  ## parentRefs defaults to gateway.parentRefs when left empty.
+  gateway:
+    enabled: false
+    parentRefs: []
+    annotations: {}

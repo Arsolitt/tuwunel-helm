@@ -159,6 +159,104 @@
         }
       }
     },
+    "routeParentRef": {
+      "description": "A Gateway API parentRef. The field set belongs to Gateway API, not to this chart, so unknown members are allowed here - the rendered route is validated against the real CRD schema in CI.",
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "sectionName": {
+          "type": "string"
+        },
+        "group": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "gatewaySpec": {
+      "description": "Gateway API exposure for the homeserver. The chart renders HTTPRoutes that attach to a Gateway you run; it never creates the Gateway itself.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "parentRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/routeParentRef"
+          }
+        },
+        "hostnames": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "annotations": {
+          "$ref": "#/definitions/stringMap"
+        }
+      }
+    },
+    "routeGatewaySpec": {
+      "description": "Gateway API exposure for the RTC host: the same Gateway(s) as the homeserver unless parentRefs is set. The path set is fixed (the JWT service's endpoints, everything else to LiveKit), so there is no hostnames knob.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "parentRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/routeParentRef"
+          }
+        },
+        "annotations": {
+          "$ref": "#/definitions/stringMap"
+        }
+      }
+    },
+    "mediaRouteSpec": {
+      "description": "Gateway API routes for the LiveKit media ports. Only meaningful with rtc.livekit.networkMode: pod, where the Service fronts those ports (a template fails the render otherwise); whether UDP/TCP proxying works is a property of the Gateway implementation, not of this chart.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "udpRoute": {
+          "type": "boolean"
+        },
+        "tcpRoute": {
+          "type": "boolean"
+        },
+        "parentRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/routeParentRef"
+          }
+        },
+        "annotations": {
+          "$ref": "#/definitions/stringMap"
+        }
+      }
+    },
     "rtcSidecarSpec": {
       "description": "Shape shared by the RTC JWT service and the LiveKit server.",
       "type": "object",
@@ -583,6 +681,9 @@
     "ingress": {
       "$ref": "#/definitions/ingressSpec"
     },
+    "gateway": {
+      "$ref": "#/definitions/gatewaySpec"
+    },
     "persistence": {
       "type": "object",
       "additionalProperties": false,
@@ -665,6 +766,9 @@
         "ingress": {
           "$ref": "#/definitions/rtcIngressSpec"
         },
+        "gateway": {
+          "$ref": "#/definitions/routeGatewaySpec"
+        },
         "jwt": {
           "$ref": "#/definitions/rtcSidecarSpec"
         },
@@ -709,6 +813,9 @@
               "description": "hostNetwork shares the node's network namespace (fixed ports, a UDP range is fine); pod routes media through rtc.livekit.service, which can only forward the single config.rtc.udp_port.",
               "type": "string",
               "enum": ["hostNetwork", "pod"]
+            },
+            "gateway": {
+              "$ref": "#/definitions/mediaRouteSpec"
             },
             "service": {
               "description": "Only used with networkMode: pod.",

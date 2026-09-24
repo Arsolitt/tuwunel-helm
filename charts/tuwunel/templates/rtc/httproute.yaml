@@ -1,0 +1,43 @@
+{{- if and .Values.rtc.enabled .Values.rtc.gateway.enabled -}}
+{{- $fullName := include "tuwunel.fullname" . -}}
+{{- $refs := .Values.rtc.gateway.parentRefs | default .Values.gateway.parentRefs -}}
+{{- if not $refs -}}
+{{- fail "rtc.gateway.enabled needs parentRefs: set rtc.gateway.parentRefs, or gateway.parentRefs to share the homeserver's" -}}
+{{- end -}}
+{{- /* The same path set the RTC Ingress routes: the JWT service owns these
+       endpoints, everything else on the host is the LiveKit server. */}}
+{{- $jwtPaths := list "/get_token" "/sfu/get" "/healthz" "/delegate_delayed_leave" "/sfu_webhook" -}}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $fullName }}-rtc
+  labels:
+    {{- include "tuwunel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rtc-ingress
+  {{- with .Values.rtc.gateway.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- toYaml $refs | nindent 4 }}
+  hostnames:
+    - {{ .Values.rtc.domain }}
+  rules:
+    - matches:
+        {{- range $jwtPaths }}
+        - path:
+            type: PathPrefix
+            value: {{ . }}
+        {{- end }}
+      backendRefs:
+        - name: {{ $fullName }}-jwt
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ $fullName }}-livekit
+          port: {{ .Values.rtc.livekit.config.port }}
+{{- end }}

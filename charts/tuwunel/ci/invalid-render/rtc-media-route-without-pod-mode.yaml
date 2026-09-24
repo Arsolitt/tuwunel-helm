@@ -1,0 +1,18 @@
+# MUST fail the render (not the schema): in hostNetwork mode the media ports are
+# node ports and no Service fronts them, so a UDPRoute would name a backend port
+# the pod only listens on at the node's address. The media routes are meaningful
+# with networkMode: pod only; the udproute template refuses the combination.
+#
+# expect-error: networkMode=pod
+server_name: matrix.ci.example
+
+rtc:
+  enabled: true
+  domain: rtc.ci.example
+
+  livekit:
+    # networkMode is the hostNetwork default on purpose
+    gateway:
+      udpRoute: true
+      parentRefs:
+        - name: eg

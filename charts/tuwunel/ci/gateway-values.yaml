@@ -1,0 +1,52 @@
+# Scenario: Gateway API exposure instead of an Ingress - the homeserver and the
+# RTC host as HTTPRoutes on a Gateway the operator runs.
+#
+# Exercises the gateway HTTPRoute: two parentRefs (one namespaced, one picking a
+# listener by sectionName), an extra hostname next to server_name, a delegated
+# domain derived from well_known.server (the port is dropped), route
+# annotations, and an RTC HTTPRoute whose parentRefs are inherited from
+# gateway.parentRefs because rtc.gateway.parentRefs is empty. No Gateway or
+# GatewayClass is rendered - the chart never creates one - and neither is an
+# Ingress.
+server_name: matrix.ci.example
+
+ingress:
+  enabled: false
+
+gateway:
+  enabled: true
+  parentRefs:
+    - name: eg
+      namespace: gateway-system
+    - name: eg
+      sectionName: https
+  hostnames:
+    - alias.ci.example
+  annotations:
+    ci.example/note: rendered
+
+config:
+  global:
+    well_known:
+      # The delegated domain: the homeserver also has to answer for
+      # matrix.ci.example, without the port.
+      server: matrix.ci.example:443
+
+rtc:
+  enabled: true
+  domain: rtc.ci.example
+
+  jwt:
+    envFromSecret:
+      LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
+      LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
+
+  livekit:
+    envFromSecret:
+      LIVEKIT_KEY: livekit-secrets/LIVEKIT_KEY
+      LIVEKIT_SECRET: livekit-secrets/LIVEKIT_SECRET
+
+  gateway:
+    enabled: true
+    annotations:
+      ci.example/note: rtc

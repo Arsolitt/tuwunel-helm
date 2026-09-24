@@ -48,7 +48,12 @@ helm package charts/tuwunel
 - `lint` - `helm lint --strict` for the chart defaults and every `charts/tuwunel/ci/*-values.yaml`
   scenario, then `helm template` + `kubeconform -strict` for the **default values** and each
   scenario on the Kubernetes versions in `env.KUBERNETES_VERSIONS` (the defaults are what
-  chart-releaser publishes, so they are validated too).
+  chart-releaser publishes, so they are validated too). kubeconform has no built-in schema for
+  `gateway.networking.k8s.io`, and `-strict` turns a missing schema into a failure, so the job
+  downloads the `HTTPRoute`/`UDPRoute`/`TCPRoute` JSON schemas from a pinned `datreeio/CRDs-catalog`
+  commit, checksum-verifies them, passes their directory as a second `-schema-location` next to
+  `default`, and fails whenever the summary is not `Skipped: 0` - a skipped resource is a kind with
+  no schema.
 - `schema` - asserts that `charts/tuwunel/ci/invalid/*.yaml` is still rejected **by the schema**
   (not by an unrelated template error), that `charts/tuwunel/ci/invalid-render/*.yaml` is
   rejected **by a template** for the value its `# expect-error:` line names, and that every
@@ -72,7 +77,9 @@ helm package charts/tuwunel
 Rules that keep this honest:
 
 - Tool pins live in the workflow `env:` block (Helm, kubeconform + its sha256, chart-releaser,
-  Kubernetes versions). Nothing uses `@latest`; Dependabot bumps the actions.
+  Kubernetes versions, the pinned `datreeio/CRDs-catalog` commit and the
+  `HTTPROUTE_SCHEMA_SHA256`/`UDPROUTE_SCHEMA_SHA256`/`TCPROUTE_SCHEMA_SHA256` schema checksums).
+  Nothing uses `@latest`; Dependabot bumps the actions.
 - Three fixture categories, one meaning each: `charts/tuwunel/ci/*-values.yaml` must render,
   `ci/invalid/*.yaml` must be rejected by `values.schema.json`, and `ci/invalid-render/*.yaml`
   must be rejected by a template `fail` (each names the value in its `# expect-error:` line).

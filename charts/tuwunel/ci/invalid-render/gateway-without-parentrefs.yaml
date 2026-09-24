@@ -1,0 +1,12 @@
+# MUST fail the render (not the schema): the chart renders HTTPRoutes that
+# attach to a Gateway the operator runs - it never creates one - so
+# `gateway.enabled: true` without a parent Gateway would render a route with an
+# empty parentRefs list. The CRD accepts that; no controller would ever attach
+# it, so the route would exist and carry no traffic. The gateway template fails
+# the render instead.
+#
+# expect-error: gateway.enabled needs gateway.parentRefs
+server_name: matrix.ci.example
+
+gateway:
+  enabled: true

@@ -15,6 +15,7 @@ This chart is designed for tuwunel but can also work with other Conduit forks su
 - Local media storage, or an S3-compatible provider through `${VAR}` credentials
 - Persistent storage support with per-PVC annotations
 - Ingress configuration, including a separate RTC ingress
+- Ingress or Gateway API (HTTPRoute) exposure, with optional UDP/TCP routes for RTC media in `pod` mode
 - Resource management
 - Environment variable injection from secrets
 - A `helm test` hook that probes the readiness path from inside the cluster

@@ -7,7 +7,9 @@
 # does not touch those paths.
 #
 #   lint     renders the chart defaults and every ci/*-values.yaml fixture and
-#            validates each render against the Kubernetes schemas.
+#            validates each render against the Kubernetes schemas, plus the
+#            Gateway API kinds the chart can render (kubeconform ships none of
+#            that group's schemas; they come from a pinned catalog commit).
 #   schema   proves ci/invalid/*.yaml is refused by values.schema.json and
 #            ci/invalid-render/*.yaml is refused by the template that owns the
 #            cross-value rule, so neither guardrail can be dropped silently.
@@ -34,6 +36,13 @@ env:
   HELM_VERSION: 4.3.0
   KUBECONFORM_VERSION: v0.8.0
   KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+  # JSON schemas for the Gateway API kinds the chart can render. kubeconform has
+  # no built-in schema for that group and -strict fails on a missing one, so the
+  # files are fetched from a pinned catalog commit and checksum-verified.
+  CRDS_CATALOG_SHA: ad3b08c5045129d7bb1eeffd8e61719b2c8dd1e2
+  HTTPROUTE_SCHEMA_SHA256: e5692e62edd9b8a14bd2527d0a732e174a649131aa4d47159737dc6527c59ca5
+  UDPROUTE_SCHEMA_SHA256: d624dc44db2eb4dfedcd02a137b7dd1ceabd11d9670335a90727b340b667e5d9
+  TCPROUTE_SCHEMA_SHA256: 91b0188d2b7b0552c462e1fc7dd531b735013e8762d725fdc1e42e49e4bf4418
   CHART_RELEASER_VERSION: v1.8.1
   # Oldest and newest Kubernetes releases the rendered manifests are checked
   # against. kubeconform fetches these schemas from yannh/kubernetes-json-schema.
@@ -61,6 +70,25 @@ jobs:
           sudo tar -xzf /tmp/kubeconform.tar.gz -C /usr/local/bin kubeconform
           helm version --short
           kubeconform -v
+
+      # kubeconform carries no schema for gateway.networking.k8s.io and -strict
+      # turns a missing schema into a failure, so the kinds this chart can render
+      # are fetched from a pinned CRDs-catalog commit and checksum-verified.
+      # kubeconform lower-cases the kind when it builds the file name, which is
+      # why the names below are the ones it looks for.
+      - name: Fetch Gateway API schemas
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/gateway-api"
+          for pair in "httproute:$HTTPROUTE_SCHEMA_SHA256" \
+                      "udproute:$UDPROUTE_SCHEMA_SHA256" \
+                      "tcproute:$TCPROUTE_SCHEMA_SHA256"; do
+            name="${pair%%:*}"
+            want="${pair##*:}"
+            curl -fsSLo "$RUNNER_TEMP/gateway-api/${name}_v1.json" \
+              "https://raw.githubusercontent.com/datreeio/CRDs-catalog/${CRDS_CATALOG_SHA}/gateway.networking.k8s.io/${name}_v1.json"
+            echo "${want}  $RUNNER_TEMP/gateway-api/${name}_v1.json" | sha256sum -c -
+          done
 
       # values.schema.json is applied by every helm command, so lint failures
       # here cover both template shape and chart-level value validation.
@@ -92,10 +120,20 @@ jobs:
                 echo "::error::$label rendered no resources"
                 exit 1
               fi
-              summary=$(kubeconform -strict -summary -kubernetes-version "$k8s" "$manifest")
+              summary=$(kubeconform -strict -summary -kubernetes-version "$k8s" \
+                -schema-location default \
+                -schema-location "$RUNNER_TEMP/gateway-api/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json" \
+                "$manifest")
               echo "$summary"
               if ! grep -qE "Summary: $expected resources? found" <<<"$summary"; then
                 echo "::error::$label: kubeconform validated an unexpected number of resources (rendered $expected)"
+                exit 1
+              fi
+              # A skipped resource is a kind with no schema - the check above
+              # would still pass, so it is worth its own failure: without it a
+              # new CRD kind would be rendered and never validated.
+              if ! grep -q 'Skipped: 0' <<<"$summary"; then
+                echo "::error::$label: kubeconform skipped resources, so a kind has no schema (add it to the pinned set)"
                 exit 1
               fi
               echo "::endgroup::"
