@@ -51,6 +51,31 @@ helm uninstall my-release
 
 The command removes all the Kubernetes components associated with the chart and deletes the release.
 
+## Documentation
+
+Task-oriented guides live in [`docs/`](docs/README.md). This README is the short version; each guide
+covers one subject in depth:
+
+| Guide | What it covers |
+| --- | --- |
+| [Installing the chart](docs/installation.md) | Prerequisites, a first install, the objects it creates, verification, uninstall |
+| [Upgrading](docs/upgrade.md) | Version contract, the 1.x to 2.0.0 checklist, the migration window, rollback limits |
+| [Configuring the server](docs/configuration.md) | How values become `config.toml`, environment variables, secrets, TOML shapes, validation |
+| [Ingress](docs/ingress.md) | Service, Ingress, TLS and the Matrix host layout |
+| [Gateway API](docs/gateway-api.md) | `HTTPRoute`, `UDPRoute` and `TCPRoute` exposure |
+| [Federation and delegation](docs/federation.md) | `server_name`, `.well-known`, DNS and TLS requirements |
+| [Matrix RTC](docs/rtc.md) | LiveKit and Element Call in both network modes |
+| [Storage and media](docs/storage-and-media.md) | Volumes, PVCs, local media, S3-compatible providers |
+| [Backups and restore](docs/backups.md) | Online backups, the scheduled sidecar, the restore drill |
+| [Secrets and hardening](docs/security.md) | Secret channels, registration, client IP, pod hardening |
+| [Day-2 operations](docs/operations.md) | Probes, migrations, rollouts, resource derivation, maintenance |
+| [Troubleshooting](docs/troubleshooting.md) | Rejected values, startup failures, collecting diagnostics |
+| [Internals](docs/internals.md) | How a values file becomes a running server, and every render guard |
+| [Development and releases](docs/development.md) | Repository layout, CI gates, the release flow |
+
+The complete value-by-value reference is the [chart README](charts/tuwunel/README.md), which ships
+inside the packaged chart (`helm show readme`).
+
 ## Configuration
 
 For detailed configuration options, see the [chart README](charts/tuwunel/README.md).

@@ -11,6 +11,12 @@ The chart requires tuwunel **v1.9.0 or newer**. It configures the server through
 v1.9.0. An older image still renders, but it ignores the chart-managed environment variables and
 does not answer the exec probe.
 
+> **Task-oriented guides** - installation, upgrades, exposure (Ingress, Gateway API, federation),
+> RTC, storage and media, backups, secrets and hardening, day-2 operations and troubleshooting -
+> live in the repository's [`docs/`](https://github.com/Arsolitt/tuwunel-helm/tree/main/docs)
+> directory. This file stays the value reference and ships inside the chart package
+> (`helm show readme`).
+
 ## Upgrading to 2.0.0
 
 Breaking changes:
