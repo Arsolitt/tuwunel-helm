@@ -78,6 +78,13 @@ config:
     ## when the rendered file contains `allow_registration = "false"`
     ## ("invalid type: found string \"false\", expected a boolean").
     ##
+    ## Keys upstream defines as an array of tables (`[[global.identity_provider]]`,
+    ## `[[global.well_known.rtc_transports]]`) need a YAML list - a nested
+    ## mapping renders as one table and the server exits with
+    ## "invalid type: found string, expected struct ...". See the chart README
+    ## for the identity_provider example: config is a passthrough, so nothing
+    ## here validates this for you.
+    ##
     ## Registration is closed by default. To open it for the first user, add a
     ## token through envsubst and a secret - never in plain values:
     ##

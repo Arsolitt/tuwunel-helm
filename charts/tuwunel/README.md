@@ -128,6 +128,33 @@ Booleans have to be TOML booleans, not strings: `allow_federation: "false"` rend
 to type `boolean`, so the quoted form is rejected at render time - existing values files that still
 carry quoted booleans have to be fixed before upgrading the chart.
 
+Keys that upstream defines as an **array of tables** (TOML `[[global.<key>]]`) have to be written as
+a YAML list. A nested mapping renders as a single table instead, which is not the shape tuwunel
+deserializes and stops the server at startup - `config` is a passthrough, so the chart cannot catch
+this for you:
+
+```yaml
+config:
+  global:
+    # WRONG: renders [global.identity_provider] with brand = "..." in it, and
+    # v1.9.2 exits with `invalid type: found string "Authentik", expected struct
+    # IdentityProvider for key "global.identity_provider.brand"`
+    # identity_provider:
+    #   brand: Authentik
+    #   client_id: ...
+    #
+    # RIGHT: `-` makes it a list, which renders [[global.identity_provider]]
+    identity_provider:
+      - brand: Authentik
+        client_id: ...
+        client_secret: ...
+        issuer_url: "https://sso.example.com/application/o/tuwunel/"
+        callback_url: "https://matrix.example.com/_matrix/client/unstable/login/sso/callback/<client_id>"
+```
+
+`identity_provider` (OIDC/LDAP providers) and `well_known.rtc_transports` are the two keys this
+chart's own examples use; the rule holds for every upstream key documented with `[[...]]`.
+
 #### Bind address
 
 kubelet probes exec inside the container, but the Service, the `helm test` pod and the RTC webhook
