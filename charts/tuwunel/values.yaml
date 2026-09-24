@@ -199,6 +199,11 @@ args: []
 service:
   annotations: {}
   type: ClusterIP
+  ## `None` makes the Service headless, which is what gives the StatefulSet its
+  ## stable per-pod DNS - and it is only accepted on a ClusterIP Service (the
+  ## API server rejects `None` on LoadBalancer/NodePort). An address pins the
+  ## VIP instead. On LoadBalancer/NodePort leave this as `None` (or empty) to
+  ## let the cluster allocate one: the chart omits the field there.
   clusterIP: "None"
 
   ## The single port knob of the chart: the Service, the Ingress backends, the

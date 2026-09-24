@@ -7,6 +7,38 @@ version is published as that GitHub release's body by the `release` job in
 Versions follow `Chart.yaml`; the matching git tag is `tuwunel-<version>`.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.0.1] - 2026-09-24
+
+### Fixed
+
+- An Ingress with `ingress.tls: true` and no delegated domain renders an applyable `spec.tls` list.
+  The delegated domain is added only when `config.global.well_known.server` is set; the empty host
+  the list used to carry made the API server refuse the whole Ingress with
+  `spec.tls[0].hosts[1]: Invalid value: ""`.
+- `service.type: LoadBalancer` and `service.type: NodePort` install without a workaround. The
+  headless default (`clusterIP: "None"`) is rendered for a `ClusterIP` Service, which is where the
+  StatefulSet needs it; the other two types let the cluster allocate the VIP instead of shipping a
+  `None` the API server rejects, and an explicitly named address still pins it. `loadBalancerIP`
+  and `loadBalancerSourceRanges` are rendered for a `LoadBalancer` only, the one type they are
+  legal on.
+- `backup.scheduled: true` now actually runs its job. The sidecar was started as the pod's
+  unprivileged user, while busybox `crond` runs a crontab file as the user that file is named after
+  - and the chart names it `root` - so `crond` could not switch identity, skipped the job, and
+  reported nothing because its log goes to syslog. No scheduled backup was ever produced; a working
+  schedule shows up as the server's `Created database backup` line and the `<backup.path>/meta/`
+  entries.
+
+### Changed
+
+- The `backup` sidecar container runs as root with only `SETGID`, `SETUID` and `KILL` added to an
+  otherwise dropped capability set, keeping its read-only root filesystem and no privilege
+  escalation.
+- `backup.scheduled: true` without `backup.enabled: true` is refused at render time with a message
+  naming the pair: the sidecar mounts a crontab ConfigMap that only the enabled render creates.
+- `service.type: ExternalName` is no longer accepted by the schema. The chart renders no
+  `externalName`, so a Service of that type could never be valid.
+- `config.global: null` no longer aborts an Ingress render.
+
 ## [2.0.0] - 2026-09-24
 
 ### Added

@@ -9,17 +9,30 @@ metadata:
   labels:
     {{- include "tuwunel.labels" . | nindent 4 }}
 spec:
+  {{- /* Only a ClusterIP Service may be headless, and the API server says so
+         outright (`may not be set to 'None' for LoadBalancer services`):
+         rendering the default unconditionally makes every other type
+         unapplyable. Those types get the field only when it names an explicit
+         address; otherwise it is omitted and the cluster allocates a VIP. */}}
+  {{- if or (eq .Values.service.type "ClusterIP") (and .Values.service.clusterIP (ne .Values.service.clusterIP "None")) }}
   clusterIP: {{ .Values.service.clusterIP | quote }}
+  {{- end }}
   {{- if .Values.service.externalIPs }}
   externalIPs:
     {{- toYaml .Values.service.externalIPs | nindent 4 }}
   {{- end }}
+  {{- /* Both fields are LoadBalancer-only: on any other type the API server
+         refuses the Service outright (`may only be used when 'type' is
+         'LoadBalancer'`), so a leftover value must not leak into a ClusterIP
+         or NodePort render. */}}
+  {{- if eq .Values.service.type "LoadBalancer" }}
   {{- if .Values.service.loadBalancerIP }}
   loadBalancerIP: {{ .Values.service.loadBalancerIP | quote }}
   {{- end }}
   {{- if .Values.service.loadBalancerSourceRanges }}
   loadBalancerSourceRanges:
     {{- toYaml .Values.service.loadBalancerSourceRanges | nindent 4 }}
+  {{- end }}
   {{- end }}
   ports:
     - name: http

@@ -1,0 +1,13 @@
+# Scenario: TLS without a delegated domain, so the Ingress TLS host list must
+# carry no empty entry - the previously broken combination, which rendered a
+# null `spec.tls[0].hosts[1]` (`Invalid value: ""`) and was refused by the API
+# server. The extra host proves it also reaches the TLS list, not only the rules.
+server_name: matrix.ci.example
+
+ingress:
+  enabled: true
+  class: nginx
+  path: /
+  tls: true
+  extraHosts:
+    - alias.ci.example

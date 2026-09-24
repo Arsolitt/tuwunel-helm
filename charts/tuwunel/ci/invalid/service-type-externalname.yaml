@@ -1,0 +1,10 @@
+# MUST be rejected: the chart renders no `externalName` (it has no such value),
+# so a Service of this type is refused by the API server - `spec.externalName:
+# Required value`, plus `spec.clusterIPs: Forbidden: may not be set for
+# ExternalName services` while the headless default is in place. kubeconform
+# cannot see it: the type itself is schema-valid, which is exactly why it has to
+# leave the schema enum.
+server_name: matrix.ci.example
+
+service:
+  type: ExternalName

@@ -1,0 +1,16 @@
+# Scenario: the scheduled backup path, driven end to end.
+#
+# The runtime job starts the backup sidecar exactly as this render describes it
+# - its image, its command and args, its root user and added capabilities, the
+# crontab ConfigMap mounted at the container's own mount path, sharing the
+# server's PID namespace - and lets crond fire the job on its own. The schedule
+# is per minute so the check observes a real firing at the next minute boundary;
+# the sibling storage-and-backup fixture keeps the manual signal for a schedule
+# that cannot fire inside the check's wait window.
+server_name: matrix.ci.example
+
+backup:
+  enabled: true
+  scheduled: true
+  schedule: "* * * * *"
+  size: 1Gi

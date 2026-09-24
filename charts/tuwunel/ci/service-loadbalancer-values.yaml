@@ -1,0 +1,15 @@
+# Scenario: the server Service published by a cloud load balancer.
+#
+# Guards the clusterIP condition: `None` (the headless default the StatefulSet
+# needs) is only legal on a ClusterIP Service, so a LoadBalancer install has to
+# render without the field and let the cluster allocate the VIP. kubeconform
+# cannot see the difference - `service.type` and a headless `clusterIP` are
+# schema-valid on their own, only the combination is not - so the lint job
+# asserts it on the render. The source-range restriction rides along because it
+# is a LoadBalancer-only field that has to keep rendering.
+server_name: matrix.ci.example
+
+service:
+  type: LoadBalancer
+  loadBalancerSourceRanges:
+    - 203.0.113.0/24

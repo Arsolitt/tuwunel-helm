@@ -3,9 +3,14 @@
 {{- $servicePort := .Values.service.port -}}
 {{- $ingressPath := .Values.ingress.path -}}
 {{- $delegatedDomain := "" }}
-{{- $isDelegatedDomain := .Values.config.global.well_known.server }}
+{{- /* config.global is a free-form passthrough map, so `config: {global: null}`
+       is valid values: reading it defensively keeps a nulled block from
+       aborting the render with `nil pointer evaluating interface {}.well_known`
+       (the Gateway template reads it the same way). */}}
+{{- $wellKnown := (get (get .Values.config "global" | default dict) "well_known" | default dict) }}
+{{- $isDelegatedDomain := get $wellKnown "server" }}
 {{- if $isDelegatedDomain }}
-{{- $delegatedDomain = mustRegexReplaceAll ":[0-9]+" .Values.config.global.well_known.server "" }}
+{{- $delegatedDomain = mustRegexReplaceAll ":[0-9]+" $isDelegatedDomain "" }}
 {{- end }}
 {{- $new := false }}
 {{- if .Capabilities.APIVersions.Has "networking.k8s.io/v1" -}}
@@ -34,7 +39,13 @@ spec:
   tls:
     - hosts:
         - {{ .Values.server_name }}
+        {{- /* config.global.well_known.server is empty on a non-delegated
+               install, so an unguarded entry here renders a null host and the
+               API server refuses the Ingress with
+               `spec.tls[0].hosts[1]: Invalid value: ""`. */}}
+        {{- if $delegatedDomain }}
         - {{ $delegatedDomain }}
+        {{- end }}
       {{- range .Values.ingress.extraHosts }}
         - {{ . }}
       {{- end }}

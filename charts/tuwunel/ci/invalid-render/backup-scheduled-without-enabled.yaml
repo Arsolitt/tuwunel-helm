@@ -1,0 +1,12 @@
+# MUST fail the render (not the schema): the backup sidecar container and its
+# crontab volume are gated on backup.scheduled, but the ConfigMap they mount is
+# part of the backups-enabled render - so the volume dangles and the pod never
+# leaves ContainerCreating, while the SIGUSR2 the job sends would run nothing
+# (admin_signal_execute is only injected with backups enabled).
+#
+# expect-error: backup.enabled
+server_name: matrix.ci.example
+
+backup:
+  enabled: false
+  scheduled: true

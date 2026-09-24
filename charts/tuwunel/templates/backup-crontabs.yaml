@@ -7,9 +7,11 @@ metadata:
     {{- include "tuwunel.labels" . | nindent 4 }}
     app.kubernetes.io/component: tuwunel-backup
 data:
-  # busybox crond reads one file per user from its spool directory (`-c`); the
-  # sidecar shares the pod's PID namespace, so the signal reaches the server,
-  # which answers it by running admin_signal_execute.
+  # The file name is the *user* crond runs that line as: it looks the name up
+  # and switches identity before exec, and it ignores a spool file it cannot do
+  # that for - which is why the sidecar container is started as root (see the
+  # StatefulSet). The sidecar shares the pod's PID namespace, so the job's
+  # signal reaches the server, which answers it by running admin_signal_execute.
   root: |
     {{ .Values.backup.schedule }} pkill -USR2 -x tuwunel
 {{- end }}

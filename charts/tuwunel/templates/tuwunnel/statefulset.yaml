@@ -28,6 +28,15 @@
 {{- fail (printf "config.global.server_name (%v) must equal server_name (%v): the chart sets TUWUNEL_SERVER_NAME from server_name" $configServerName .Values.server_name) }}
 {{- end }}
 
+{{/* The sidecar container and its crontab volume are gated on backup.scheduled,
+     but the ConfigMap they mount belongs to the backups-enabled render: a
+     dangling volume keeps the pod in ContainerCreating forever, and the SIGUSR2
+     would run nothing anyway, because admin_signal_execute is only injected
+     when backups are enabled. */}}
+{{- if and .Values.backup.scheduled (not .Values.backup.enabled) }}
+{{- fail "backup.scheduled needs backup.enabled: the sidecar mounts the crontab ConfigMap, which only the backups-enabled render creates" }}
+{{- end }}
+
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -247,12 +256,25 @@ spec:
           args: ["-f", "-l", "8", "-c", "/etc/crontabs"]
           resources:
             {{- toYaml .Values.backup.sidecar.resources | nindent 12 }}
+          # crond runs a spool file as the user that file is *named* after, and
+          # this chart names it `root`, so the job cannot start without SETGID
+          # and SETUID; the job signals a server running as a different uid with
+          # pkill -USR2, which needs KILL. The OCI runtime grants capabilities
+          # only to a root process, so dropping to the pod's uid 2020 would
+          # leave crond unable to start its own job at all.
           securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
             capabilities:
               drop:
                 - ALL
+              add:
+                - SETGID
+                - SETUID
+                - KILL
           volumeMounts:
             - name: backup-crontabs
               mountPath: /etc/crontabs

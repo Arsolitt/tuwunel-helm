@@ -638,11 +638,12 @@
           "$ref": "#/definitions/stringMap"
         },
         "type": {
+          "description": "ClusterIP, NodePort or LoadBalancer. ExternalName is not offered: the chart has no externalName value, so the API server would refuse the Service it renders.",
           "type": "string",
-          "enum": ["ClusterIP", "NodePort", "LoadBalancer", "ExternalName"]
+          "enum": ["ClusterIP", "NodePort", "LoadBalancer"]
         },
         "clusterIP": {
-          "description": "Defaults to 'None' (headless service required by the StatefulSet).",
+          "description": "'None' makes the Service headless (the stable per-pod DNS the StatefulSet needs) and is only accepted on a ClusterIP Service; an address pins the VIP. On LoadBalancer/NodePort, 'None' or an empty string means the cluster allocates one - the field is then omitted.",
           "type": "string"
         },
         "port": {

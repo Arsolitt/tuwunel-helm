@@ -20,4 +20,4 @@ sources:
 - https://github.com/Arsolitt/tuwunel-helm
 - https://github.com/matrix-construct/tuwunel
 type: application
-version: 2.0.0
+version: 2.0.1
