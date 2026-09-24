@@ -3,6 +3,34 @@ entries:
   tuwunel:
   - apiVersion: v2
     appVersion: v1.9.2
+    created: "2026-09-24T12:53:17.165066412Z"
+    description: Helm chart for tuwunel - a Matrix homeserver based on Conduit with
+      optional LiveKit RTC support
+    digest: 1aa5a9b9b57d09a17bce76318385fb18aeff533d362cc895dfb1e54e47ae872e
+    home: https://github.com/Arsolitt/tuwunel-helm
+    keywords:
+    - tuwunel
+    - matrix
+    - homeserver
+    - conduit
+    - livekit
+    - element-call
+    - rtc
+    kubeVersion: '>=1.31.0-0'
+    maintainers:
+    - email: arsolitt@gmail.com
+      name: Arsolitt
+      url: https://github.com/Arsolitt
+    name: tuwunel
+    sources:
+    - https://github.com/Arsolitt/tuwunel-helm
+    - https://github.com/matrix-construct/tuwunel
+    type: application
+    urls:
+    - https://github.com/Arsolitt/tuwunel-helm/releases/download/tuwunel-2.0.1/tuwunel-2.0.1.tgz
+    version: 2.0.1
+  - apiVersion: v2
+    appVersion: v1.9.2
     created: "2026-09-24T10:16:50.636010359Z"
     description: Helm chart for tuwunel - a Matrix homeserver based on Conduit with
       optional LiveKit RTC support
@@ -187,4 +215,4 @@ entries:
     urls:
     - https://github.com/Arsolitt/tuwunel-helm/releases/download/tuwunel-1.0.0/tuwunel-1.0.0.tgz
     version: 1.0.0
-generated: "2026-09-24T10:16:50.636036027Z"
+generated: "2026-09-24T12:53:17.165106196Z"
