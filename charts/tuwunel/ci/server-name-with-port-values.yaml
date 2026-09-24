@@ -1,0 +1,31 @@
+# Scenario: a Matrix server name that carries a port, on both exposure paths.
+#
+# Matrix allows the server name to include a port (`matrix.ci.example:8448`) and
+# the chart keeps it where it is a name: TUWUNEL_SERVER_NAME and config.toml are
+# built from the values. The fields rendered from it are Kubernetes host fields
+# though - Ingress rules and TLS hosts, HTTPRoute hostnames - and the API server
+# refuses a port there, so tuwunel.host drops it at render time (the same
+# normalisation the delegated domain from well_known.server already got). The
+# extra host and the gateway hostname go through the same path.
+server_name: matrix.ci.example:8448
+
+ingress:
+  enabled: true
+  class: nginx
+  tls: true
+  extraHosts:
+    - alias.ci.example:8443
+
+gateway:
+  enabled: true
+  parentRefs:
+    - name: eg
+  hostnames:
+    - alt.ci.example
+
+config:
+  global:
+    # config.global.server_name has to agree with server_name: TUWUNEL_SERVER_NAME
+    # is set from server_name and an environment variable wins over the file, so
+    # the StatefulSet refuses a mismatch. The port is part of the name.
+    server_name: matrix.ci.example:8448

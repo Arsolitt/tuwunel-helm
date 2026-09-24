@@ -1,0 +1,7 @@
+# MUST be rejected: the tag is rendered verbatim after the ':' separator, so an
+# empty one produces `image: "ghcr.io/matrix-construct/tuwunel:"` - a reference
+# the kubelet refuses with InvalidImageName, leaving the pod unschedulable.
+server_name: matrix.ci.example
+
+image:
+  tag: ""

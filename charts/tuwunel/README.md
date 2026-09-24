@@ -82,6 +82,11 @@ The following tables list the configurable parameters of the tuwunel chart and t
 `initContainer.image` at a multi-arch (or mirrored) equivalent or pin the pod to an amd64 node;
 the tuwunel image itself is multi-arch.
 
+Every image `tag` is required and non-empty - `image`, `initContainer.image`, `busybox.image` and,
+further down, `rtc.jwt.image` and `rtc.livekit.image`. The schema's `minLength` refuses an empty one
+at `helm lint`/`helm template` time, where it used to render `<repository>:` and fail in the kubelet
+as `InvalidImageName`.
+
 ### Environment Variables
 
 | Parameter              | Description                                          | Default |
@@ -103,6 +108,12 @@ envFromSecret:
 container, so a `${VAR}` placeholder in `config` and a direct reference to the same variable
 always agree. `extraEnv` is applied to the tuwunel container last, on top of everything else.
 
+Every name in those four values is checked against Kubernetes' environment-variable rule -
+`[-._a-zA-Z]` first, then `[-._a-zA-Z0-9]` - by the schema, for `env`, `envFromSecret`, `extraEnv`
+and the `name` of an `envRaw` entry. A name like `2FA_TOKEN` is refused at `helm lint`/
+`helm template` time with the key and the pattern in the message, instead of by the API server at
+apply time.
+
 ### Tuwunel Configuration
 
 The `config` section is converted directly into the tuwunel configuration file. See the [tuwunel documentation](https://github.com/matrix-construct/tuwunel) for all available options.
@@ -119,7 +130,7 @@ The `config` section is converted directly into the tuwunel configuration file. 
 | `config.global.ip_source_trusted_subnets`   | CIDRs that keep their connection address instead of `ip_source`                             | unset (`[]`)             |
 | `config.global.db_pool_max_workers`         | RocksDB thread pool size; upstream default 2048 can exceed the pod task limit                | unset (upstream `2048`)  |
 | `config.global.well_known.client`           | Client delegation URL (for delegated domains)                                               |                          |
-| `config.global.well_known.server`           | Server delegation (for delegated domains)                                                   |                          |
+| `config.global.well_known.server`           | Server delegation: a bare `host:port`, never a URL - the render refuses a scheme             |                          |
 | `config.global.well_known.livekit_url`      | MatrixRTC focus URL; set by the chart when `rtc.enabled` is true                            |                          |
 | `config.global.well_known.rtc_transports`   | RTC transports for Element Call; escape hatch for a non-LiveKit focus                       |                          |
 | `config.global.ldap`                        | LDAP configuration                                                                          | `{}`                     |
@@ -222,6 +233,14 @@ being ignored (see [Upgrading to 2.0.0](#upgrading-to-200)).
 cert-manager annotations issuing it, for example). Setting `ingress.extraHosts` adds a hostname to
 both the rules and that list.
 
+Every host field the chart renders goes through the same normalisation: a trailing `:port` is
+stripped from `server_name`, `ingress.extraHosts`, `gateway.hostnames` and the delegated domain,
+because an Ingress rule host, an Ingress TLS host and an `HTTPRoute` hostname all take a bare
+hostname. `server_name` itself may carry a port - Matrix allows one - and `TUWUNEL_SERVER_NAME` and
+`config.toml` keep the configured value; only the host fields are stripped. A value containing
+`://` has no hostname to strip to, so the render fails with a message naming the field and the
+value instead of emitting an unusable host.
+
 ### Gateway API
 
 The chart can expose the homeserver through `gateway.networking.k8s.io` routes instead of an
@@ -233,10 +252,11 @@ same time; they are served by different controllers, so running both is the supp
 a cutover.
 
 The homeserver route is named `<fullname>` and carries every hostname the server has to answer for:
-`server_name`, the delegated domain from `config.global.well_known.server` with its port stripped
-(the rule the Ingress already follows) and `gateway.hostnames`. A single catch-all `PathPrefix /`
-rule points at `<fullname>:service.port`; with both hostnames listed, one rule covers what the
-Ingress splits into separate path sets.
+`server_name`, the delegated domain from `config.global.well_known.server` and
+`gateway.hostnames`, each through the same host normalisation the Ingress uses - a trailing `:port`
+is stripped and a scheme fails the render - so a route hostname is always a bare hostname. A single
+catch-all `PathPrefix /` rule points at `<fullname>:service.port`; with both hostnames listed, one
+rule covers what the Ingress splits into separate path sets.
 
 | Parameter             | Description                                             | Default         |
 | --------------------- | ------------------------------------------------------- | --------------- |
@@ -713,6 +733,10 @@ working:
 - Homeserver config: `config.global.well_known.livekit_url = https://<rtc.domain>` when
   `rtc.enabled` is true and neither `livekit_url` nor `rtc_transports` is set.
 
+The chart adds the scheme to `rtc.domain` itself, so the value has to be a bare lowercase hostname.
+With `rtc.enabled: true` the schema refuses a scheme, a port, uppercase and underscores; a scheme
+would otherwise render `https://https://...`.
+
 `livekit_url` is what the client API endpoint
 `/_matrix/client/unstable/org.matrix.msc4143/rtc/transports` answers from. With it unset that
 endpoint returns an empty transport list and clients report that no MatrixRTC transport is
@@ -780,7 +804,7 @@ TURN: pass an external TURN server through to clients with `rtc.livekit.config.r
 | Parameter                              | Description                                           | Default                    |
 | -------------------------------------- | ----------------------------------------------------- | -------------------------- |
 | `rtc.enabled`                          | Enable Matrix RTC support                             | `false`                    |
-| `rtc.domain`                           | RTC domain for LiveKit services                       | `""`                       |
+| `rtc.domain`                           | Bare lowercase hostname; no scheme or port            | `""`                       |
 | `rtc.jwt.image.repository`             | JWT service image                                     | `ghcr.io/element-hq/lk-jwt-service` |
 | `rtc.jwt.image.tag`                    | JWT service image tag                                 | `0.7.0`                    |
 | `rtc.jwt.resources`                    | JWT service resources                                 | 50m-200m/128Mi-256Mi       |
@@ -811,7 +835,7 @@ TURN: pass an external TURN server through to clients with `rtc.livekit.config.r
 | `rtc.livekit.service.externalTrafficPolicy` | `Cluster` or `Local`; `Local` is what a LoadBalancer should use | `Cluster`    |
 | `rtc.livekit.service.loadBalancerIP`   | Load balancer IP for the LiveKit Service              | `""`                       |
 | `rtc.livekit.service.loadBalancerSourceRanges` | Allowed CIDRs for the LiveKit Service         | `[]`                       |
-| `rtc.livekit.config.port`              | HTTP API port                                         | `7880`                     |
+| `rtc.livekit.config.port`              | HTTP API port; a port number, digits only             | `7880`                     |
 | `rtc.livekit.config.rtc.tcp_port`      | RTC TCP port                                          | `7881`                     |
 | `rtc.livekit.config.rtc.port_range_start` | UDP port range start (hostNetwork)                 | `50100`                    |
 | `rtc.livekit.config.rtc.port_range_end` | UDP port range end (hostNetwork)                     | `50200`                    |
@@ -826,6 +850,11 @@ TURN: pass an external TURN server through to clients with `rtc.livekit.config.r
 | `rtc.gateway.enabled`                  | Enable the RTC HTTPRoute                              | `false`                    |
 | `rtc.gateway.parentRefs`               | Gateways the RTC route attaches to                    | `[]`                       |
 | `rtc.gateway.annotations`              | Annotations for the RTC HTTPRoute                     | `{}`                       |
+
+`rtc.livekit.config.port` is the one port the chart builds four objects from: the LiveKit container
+port, the `http` port of the LiveKit Service, and the backend port of both the RTC Ingress and the
+RTC HTTPRoute. It therefore has to be a port number: an empty value fails the render with a message
+naming those four consumers, and so does a value that is not digits only.
 
 ### Deployment
 

@@ -1,0 +1,18 @@
+# MUST fail the render (not the schema): rtc.livekit.config.port is one value
+# behind four manifests - the LiveKit container port, the port of the Service in
+# front of it, and the backend port of the RTC Ingress and the RTC HTTPRoute. An
+# empty value renders `port:`/`number:` (null) in each of them, which the API
+# server refuses without naming the value, so the Service template refuses it
+# instead (the other three templates read the same key and never get the chance
+# to render: a failing render aborts the release).
+#
+# expect-error: rtc.livekit.config.port
+server_name: matrix.ci.example
+
+rtc:
+  enabled: true
+  domain: rtc.ci.example
+
+  livekit:
+    config:
+      port: ""

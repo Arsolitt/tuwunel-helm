@@ -27,6 +27,29 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   reported nothing because its log goes to syslog. No scheduled backup was ever produced; a working
   schedule shows up as the server's `Created database backup` line and the `<backup.path>/meta/`
   entries.
+- Host fields are normalised through one helper: a trailing `:port` is stripped from `server_name`,
+  each `ingress.extraHosts` entry, each `gateway.hostnames` entry and
+  `config.global.well_known.server`, because those values become Ingress rule/TLS hosts and
+  HTTPRoute hostnames, where a port is invalid - a `server_name` like `host:8448` used to render
+  hosts the API server refuses. A value carrying a scheme has nothing to strip to a hostname, so the
+  render fails naming the field and the value instead of emitting an unusable host. `server_name`
+  keeps its port in `TUWUNEL_SERVER_NAME` and in `config.toml`; only the host fields are stripped.
+- `rtc.domain` is pinned to a bare lowercase DNS name: the schema refuses a scheme, a port,
+  uppercase and underscores when `rtc.enabled` is true. The chart prefixes the value itself
+  (`https://<rtc.domain>` for the well-known document, `wss://<rtc.domain>` for `LIVEKIT_URL`), so a
+  scheme in the value used to render `https://https://...`.
+- `rtc.livekit.config.port` has to be a port number. The LiveKit container port, the LiveKit
+  Service, the RTC Ingress and the RTC HTTPRoute are all built from it, so an empty value now fails
+  the render with a message naming those four consumers, and one that is not digits only is refused
+  with the same explanation.
+- Environment-variable names are validated against Kubernetes' rule
+  (`[-._a-zA-Z][-._a-zA-Z0-9]*`) by the schema, for `env`, `envFromSecret`, `extraEnv` and the
+  `name` of `envRaw` entries: a name like `2FA_TOKEN` is refused at `helm lint`/`helm template` time
+  instead of by the API server at apply time.
+- Image `tag` is required to be non-empty (the schema's `minLength`; `repository` already had it)
+  for `image`, `initContainer.image`, `busybox.image`, `rtc.jwt.image` and `rtc.livekit.image`: an
+  empty tag rendered `ghcr.io/matrix-construct/tuwunel:` and failed in the kubelet as
+  `InvalidImageName`.
 
 ### Changed
 
@@ -38,6 +61,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `service.type: ExternalName` is no longer accepted by the schema. The chart renders no
   `externalName`, so a Service of that type could never be valid.
 - `config.global: null` no longer aborts an Ingress render.
+- `config.global.well_known.server` written as a URL is refused at render time, with or without an
+  Ingress or a Gateway API route: the key is a bare `host:port` and the server refuses anything
+  else at startup, so the render says so first instead of leaving a crash-looping pod behind.
 
 ## [2.0.0] - 2026-09-24
 

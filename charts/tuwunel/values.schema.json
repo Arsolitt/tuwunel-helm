@@ -36,22 +36,28 @@
       }
     },
     "scalarMap": {
-      "description": "String-to-scalar map; values are quoted into environment variables.",
+      "description": "String-to-scalar map; keys become container env names, so they have to be names Kubernetes accepts ([-._a-zA-Z][-._a-zA-Z0-9]*), and values are quoted into environment variables.",
       "type": "object",
+      "propertyNames": {
+        "pattern": "^[-._a-zA-Z][-._a-zA-Z0-9]*$"
+      },
       "additionalProperties": {
         "type": ["string", "number", "boolean"]
       }
     },
     "secretEnvMap": {
-      "description": "Environment variables sourced from Secrets. Values must be '<secret-name>/<key>'; the chart splits on '/' and fails at render time otherwise.",
+      "description": "Environment variables sourced from Secrets. Keys become container env names, so they have to be names Kubernetes accepts ([-._a-zA-Z][-._a-zA-Z0-9]*). Values must be '<secret-name>/<key>'; the chart splits on '/' and fails at render time otherwise.",
       "type": "object",
+      "propertyNames": {
+        "pattern": "^[-._a-zA-Z][-._a-zA-Z0-9]*$"
+      },
       "additionalProperties": {
         "type": "string",
         "pattern": "^[^/]+/[^/]+$"
       }
     },
     "envVarList": {
-      "description": "Raw Kubernetes env entries passed through with toYaml.",
+      "description": "Raw Kubernetes env entries passed through with toYaml. The name has to be one Kubernetes accepts; the rest of the entry (value, valueFrom, ...) is passed through as written.",
       "type": "array",
       "items": {
         "type": "object",
@@ -60,7 +66,8 @@
         "properties": {
           "name": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "pattern": "^[-._a-zA-Z][-._a-zA-Z0-9]*$"
           }
         }
       }
@@ -76,7 +83,8 @@
         },
         "tag": {
           "type": ["string", "number"],
-          "description": "Rendered verbatim after the ':' separator; the main tuwunel image tag additionally goes through tpl()."
+          "minLength": 1,
+          "description": "Rendered verbatim after the ':' separator, so it cannot be empty (an empty tag renders 'name:', which the kubelet refuses as InvalidImageName); the main tuwunel image tag additionally goes through tpl()."
         },
         "pullPolicy": {
           "type": "string",
@@ -530,7 +538,7 @@
       }
     },
     "extraEnv": {
-      "description": "Additional environment variables for the tuwunel container; both name and value are required.",
+      "description": "Additional environment variables for the tuwunel container; both name and value are required, and the name has to be one Kubernetes accepts.",
       "type": "array",
       "items": {
         "type": "object",
@@ -539,7 +547,8 @@
         "properties": {
           "name": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "pattern": "^[-._a-zA-Z][-._a-zA-Z0-9]*$"
           },
           "value": {
             "type": ["string", "number", "boolean"]
@@ -748,12 +757,13 @@
         "required": ["enabled"]
       },
       "then": {
-        "description": "With RTC enabled, the domain is what the discovery record, the JWT service and the ingress are built from - a missing one would render an unroutable deployment.",
+        "description": "With RTC enabled, the domain is what the discovery record, the JWT service and the ingress are built from - a missing one would render an unroutable deployment. It is written verbatim into an Ingress/HTTPRoute host and into a URL ('https://<domain>'), so only a bare lowercase DNS name works.",
         "required": ["domain"],
         "properties": {
           "domain": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
           }
         }
       },
@@ -762,7 +772,8 @@
           "type": "boolean"
         },
         "domain": {
-          "type": "string"
+          "type": "string",
+          "description": "Bare lowercase DNS name, checked when RTC is enabled; the unused default is an empty string, which is why the rule lives on the enabled branch."
         },
         "ingress": {
           "$ref": "#/definitions/rtcIngressSpec"

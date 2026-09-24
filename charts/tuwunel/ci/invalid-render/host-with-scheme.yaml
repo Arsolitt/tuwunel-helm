@@ -1,0 +1,14 @@
+# MUST fail the render (not the schema): the host fields the chart renders from
+# server_name (Ingress rules and TLS hosts, the HTTPRoute hostname) take a bare
+# hostname, and `https://matrix.ci.example` is not one - a scheme cannot be
+# normalised away the way the port can: guessing the host behind it would put a
+# name in the manifest that appears nowhere in the values, while
+# TUWUNEL_SERVER_NAME and the rendered config.toml keep the value as configured.
+# So the tuwunel.host helper fails the render instead, naming the value.
+#
+# expect-error: must be a bare hostname
+server_name: https://matrix.ci.example
+
+ingress:
+  enabled: true
+  class: nginx

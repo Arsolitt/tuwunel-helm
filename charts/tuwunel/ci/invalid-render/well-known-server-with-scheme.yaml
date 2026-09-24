@@ -1,0 +1,17 @@
+# MUST fail the render (not the schema): config.global.well_known.server is the
+# delegated domain as upstream reads it out of config.toml - a bare `host:port`
+# served as `m.server` - so a value written as a URL is wrong however the
+# release is exposed: the server refuses it at startup (`server name is not a
+# valid IP address or domain name for key "global.well_known.server"`, exit 1).
+# The exposure templates refuse it too, through tuwunel.host, but only when they
+# render it as a host field; the configmap template owns the rule for every
+# install, so no ingress or gateway is enabled here (adding ingress.enabled
+# changes nothing: the same guard fires first).
+#
+# expect-error: config.global.well_known.server must be a bare host:port, not a URL
+server_name: matrix.ci.example
+
+config:
+  global:
+    well_known:
+      server: https://matrix.ci.example

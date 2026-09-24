@@ -1,0 +1,10 @@
+# MUST be rejected: rtc.domain is used verbatim as an Ingress/HTTPRoute host and
+# prefixed into the URLs the chart builds (`https://<domain>` for the discovery
+# record, `wss://<domain>` for the JWT service), so a value that carries a scheme
+# renders `https://https://rtc.ci.example` and a host the API server refuses.
+# Only a bare lowercase DNS name is a value that renders.
+server_name: matrix.ci.example
+
+rtc:
+  enabled: true
+  domain: "https://rtc.ci.example"

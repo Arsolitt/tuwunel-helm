@@ -1,0 +1,8 @@
+# MUST be rejected: an empty repository renders `image: ":v1.9.2"`, which the
+# kubelet refuses with InvalidImageName. Every image the chart renders (the
+# server, the init container, the backup sidecar's busybox, the RTC sidecars)
+# shares this shape, so the rule lives on the definition rather than on the key.
+server_name: matrix.ci.example
+
+image:
+  repository: ""

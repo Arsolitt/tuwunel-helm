@@ -1,6 +1,22 @@
 {{- $cfg := deepCopy .Values.config }}
 {{- $global := (get $cfg "global" | default dict) }}
 {{- $injected := false }}
+{{/* config.global.well_known.server is the delegated domain, and upstream takes
+     it as a bare `host:port`: the key is written into config.toml verbatim and
+     served as `m.server` in /.well-known/matrix/server. A URL is never valid
+     there, and it is not something this chart could normalise - there is no
+     host to strip back out of a scheme - so the value is wrong however the
+     release is exposed. The exposure templates refuse it through tuwunel.host
+     when they render it as a host field, but they only render with ingress or
+     gateway enabled; this file renders on every install, so the refusal lives
+     here (upstream's own message for the URL is
+     `server name is not a valid IP address or domain name for key
+     "global.well_known.server"`, exit 1, at startup). */}}
+{{- $wellKnown := (get $global "well_known" | default dict) }}
+{{- $delegatedDomain := get $wellKnown "server" }}
+{{- if and $delegatedDomain (contains "://" (lower (toString $delegatedDomain))) }}
+{{- fail (printf "config.global.well_known.server must be a bare host:port, not a URL: %q - it is written into config.toml and served as m.server, and the server refuses a URL at startup" $delegatedDomain) }}
+{{- end }}
 {{/* rtc.enabled has to advertise the focus on both MatrixRTC discovery
      surfaces, and the client API endpoint
      (/_matrix/client/unstable/org.matrix.msc4143/rtc/transports) is built from

@@ -2,6 +2,10 @@
 {{- $fullName := include "tuwunel.fullname" . -}}
 {{- $servicePort := .Values.service.port -}}
 {{- $ingressPath := .Values.ingress.path -}}
+{{- /* server_name is a Matrix name and may carry a port (`matrix.example.com:8448`),
+       which the host fields below must not - tuwunel.host drops it (and refuses
+       a scheme). Normalised once and used for every rule and TLS host. */}}
+{{- $serverNameHost := include "tuwunel.host" (dict "value" .Values.server_name "label" "server_name") }}
 {{- $delegatedDomain := "" }}
 {{- /* config.global is a free-form passthrough map, so `config: {global: null}`
        is valid values: reading it defensively keeps a nulled block from
@@ -10,7 +14,9 @@
 {{- $wellKnown := (get (get .Values.config "global" | default dict) "well_known" | default dict) }}
 {{- $isDelegatedDomain := get $wellKnown "server" }}
 {{- if $isDelegatedDomain }}
-{{- $delegatedDomain = mustRegexReplaceAll ":[0-9]+" $isDelegatedDomain "" }}
+{{- /* A host field, so the port the delegated domain may carry is dropped:
+       tuwunel.host owns that normalisation for every host this chart renders. */}}
+{{- $delegatedDomain = include "tuwunel.host" (dict "value" $isDelegatedDomain "label" "config.global.well_known.server") }}
 {{- end }}
 {{- $new := false }}
 {{- if .Capabilities.APIVersions.Has "networking.k8s.io/v1" -}}
@@ -38,7 +44,7 @@ spec:
   {{- if .Values.ingress.tls }}
   tls:
     - hosts:
-        - {{ .Values.server_name }}
+        - {{ $serverNameHost }}
         {{- /* config.global.well_known.server is empty on a non-delegated
                install, so an unguarded entry here renders a null host and the
                API server refuses the Ingress with
@@ -47,13 +53,13 @@ spec:
         - {{ $delegatedDomain }}
         {{- end }}
       {{- range .Values.ingress.extraHosts }}
-        - {{ . }}
+        - {{ include "tuwunel.host" (dict "value" . "label" "ingress.extraHosts") }}
       {{- end }}
       secretName: {{ .Values.ingress.tlsSecretName | default (printf "%s-tls" $fullName) }}
   {{- end }}
   rules:
     {{- if $isDelegatedDomain }}
-    - host: {{ .Values.server_name }}
+    - host: {{ $serverNameHost }}
       http:
         paths:
           - path: "/.well-known/matrix"
@@ -88,7 +94,7 @@ spec:
     {{- if $isDelegatedDomain }}
     - host: {{ $delegatedDomain }}
     {{- else }}
-    - host: {{ .Values.server_name }}
+    - host: {{ $serverNameHost }}
     {{- end }}
       http:
         paths:
@@ -107,7 +113,7 @@ spec:
               servicePort: {{ $servicePort }}
               {{- end }}
     {{- range .Values.ingress.extraHosts }}
-    - host: {{ . }}
+    - host: {{ include "tuwunel.host" (dict "value" . "label" "ingress.extraHosts") }}
       http:
         paths:
           - path: {{ $ingressPath }}

@@ -1,0 +1,8 @@
+# MUST be rejected: env keys are rendered verbatim as container env names, and
+# Kubernetes accepts only [-._a-zA-Z][-._a-zA-Z0-9]* - a name starting with a
+# digit makes the API server refuse the whole StatefulSet
+# (`env[0].name: Invalid value: "2FA_TOKEN": must not start with a digit`).
+server_name: matrix.ci.example
+
+env:
+  2FA_TOKEN: abc

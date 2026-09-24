@@ -6,13 +6,14 @@
 {{- end -}}
 {{- /* The delegated host is derived the same way the Ingress derives it, but
        defensively: `config: {}` is a valid values set, so a missing global or
-       well_known block must not abort the render. */}}
+       well_known block must not abort the render. Every hostname goes through
+       tuwunel.host, which drops a Matrix server name's port and refuses a
+       scheme. */}}
 {{- $wellKnown := (get (get .Values.config "global" | default dict) "well_known" | default dict) -}}
 {{- $delegated := get $wellKnown "server" -}}
-{{- if $delegated }}{{ $delegated = mustRegexReplaceAll ":[0-9]+" $delegated "" }}{{ end -}}
-{{- $hostnames := list .Values.server_name -}}
-{{- if $delegated }}{{ $hostnames = append $hostnames $delegated }}{{ end -}}
-{{- range .Values.gateway.hostnames }}{{ $hostnames = append $hostnames . }}{{ end -}}
+{{- $hostnames := list (include "tuwunel.host" (dict "value" .Values.server_name "label" "server_name")) -}}
+{{- if $delegated }}{{ $hostnames = append $hostnames (include "tuwunel.host" (dict "value" $delegated "label" "config.global.well_known.server")) }}{{ end -}}
+{{- range .Values.gateway.hostnames }}{{ $hostnames = append $hostnames (include "tuwunel.host" (dict "value" . "label" "gateway.hostnames")) }}{{ end -}}
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
