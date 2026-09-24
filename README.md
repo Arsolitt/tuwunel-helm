@@ -138,10 +138,15 @@ The chart's environment, probe and configuration contract targets tuwunel v1.9.0
 
 Releases are automated by [`.github/workflows/ci.yaml`](./.github/workflows/ci.yaml):
 
-1. Bump `version` in [`charts/tuwunel/Chart.yaml`](charts/tuwunel/Chart.yaml) and merge to `main`.
+1. Bump `version` in [`charts/tuwunel/Chart.yaml`](charts/tuwunel/Chart.yaml) and add the matching
+   `## [<version>] - <date>` section to [`CHANGELOG.md`](./CHANGELOG.md) in the same commit, then
+   merge to `main`.
 2. `chart-releaser` packages the chart, creates the `tuwunel-<version>` tag and
    GitHub release, and updates the `index.yaml` served from the `gh-pages` branch.
-3. `helm repo update` on a consumer then picks the new version up.
+3. The `release` job copies that changelog section into the GitHub release body (followed by a
+   compare link to the previous tag). A released version with no such section fails the job, so a
+   release body can never silently stay the chart `description`.
+4. `helm repo update` on a consumer then picks the new version up.
 
 A merge that does not change the chart version publishes nothing, so documentation
 and CI changes are safe. Only stable versions are published - there is no

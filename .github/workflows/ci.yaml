@@ -14,6 +14,9 @@
 #            ci/invalid-render/*.yaml is refused by the template that owns the
 #            cross-value rule, so neither guardrail can be dropped silently.
 #   runtime  starts the real image on every fixture (see hack/runtime-check.sh).
+#   release  runs on main: chart-releaser publishes any chart version that is not
+#            released yet, then the released version's CHANGELOG.md section
+#            becomes the GitHub release body.
 #
 # Tool pins live in `env:` below; Dependabot keeps the actions themselves fresh.
 name: CI
@@ -290,7 +293,9 @@ jobs:
       # Packages every chart whose version is not released yet, creates the
       # `<chart>-<version>` tag and GitHub release, and updates the index.yaml
       # published by the gh-pages branch. A chart version that is already
-      # released is skipped, so doc-only merges are a no-op.
+      # released is skipped, so doc-only merges are a no-op. The releases it
+      # creates carry the chart `description` as their body; the next step
+      # replaces that with the chart's CHANGELOG.md section.
       - name: Run chart-releaser
         id: release
         uses: helm/chart-releaser-action@v1.7.0
@@ -299,6 +304,44 @@ jobs:
           skip_existing: true
         env:
           CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The release body has to come from the repository, and chart-releaser
+      # cannot carry it: chart-releaser-action@v1.7.0 has no notes input, and
+      # `cr upload` reads `--release-notes-file` only from inside the packaged
+      # chart. So the body is edited in after the release exists, from
+      # CHANGELOG.md - the `## [<version>]` section of the version that was just
+      # released, plus a compare link. A released version without that section
+      # fails this step, and the job, rather than publishing a release whose
+      # body silently stayed the chart description.
+      - name: Publish release notes
+        if: steps.release.outputs.changed_charts != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANGED_CHARTS: ${{ steps.release.outputs.changed_charts }}
+        run: |
+          set -euo pipefail
+          notes=$(mktemp)
+          trap 'rm -f "$notes"' EXIT
+          # `changed_charts` is a comma-separated list of chart directories
+          # (cr.sh writes it with IFS=,), and an empty string when no version
+          # changed - which is what the `if:` above filters out, repeated here so
+          # the block is a no-op when run by hand too (and because `"${charts[@]}"`
+          # on an empty array trips `set -u` before bash 4.4). The action's other
+          # output is not usable here: `chart_version` is the *previous* tag
+          # (`git describe --tags --abbrev=0 HEAD~`), so the released version is
+          # read back from each chart's Chart.yaml.
+          if [ -n "$CHANGED_CHARTS" ]; then
+            IFS=',' read -ra charts <<<"$CHANGED_CHARTS"
+            for chart_dir in "${charts[@]}"; do
+              [ -n "$chart_dir" ] || continue
+              name=$(awk '/^name:/ { print $2; exit }' "$chart_dir/Chart.yaml")
+              version=$(awk '/^version:/ { print $2; exit }' "$chart_dir/Chart.yaml")
+              tag="${name}-${version}"
+              hack/release-notes.sh "$version" > "$notes"
+              gh release edit "$tag" --notes-file "$notes"
+              echo "::notice::$tag published with the release notes from CHANGELOG.md"
+            done
+          fi
 
       - name: Summarize
         env:

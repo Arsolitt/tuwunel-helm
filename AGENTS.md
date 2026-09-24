@@ -72,7 +72,12 @@ helm package charts/tuwunel
 - `release` - `push` to `main` only, `needs: [lint, schema, runtime]`, runs `chart-releaser`. It packages
   charts whose `version` is not released yet, creates the `tuwunel-<version>` tag and GitHub
   release, and updates `index.yaml` on `gh-pages`. Unchanged versions are skipped, so a
-  documentation-only merge publishes nothing.
+  documentation-only merge publishes nothing. The release body is not the action's - it has no
+  notes input - so steps after chart-releaser read `name`/`version` from each chart in the action's
+  `changed_charts` output and run `gh release edit <tag> --notes-file` with what
+  `hack/release-notes.sh` prints: the `## [<version>]` section of `CHANGELOG.md`, plus a compare
+  link. A released version with no such section fails the job, so a body can never silently stay
+  the chart `description`.
 
 Rules that keep this honest:
 
