@@ -28,11 +28,11 @@ The chart adds three things around that server-side feature:
 |---|---|
 | A dedicated volume | PVC `<fullname>-backup` (or `backup.existingClaim`) mounted at `backup.path` |
 | The config keys that point the server at it | `database_backup_path` and `database_backups_to_keep` in `config.toml`, injected only when you have not set them yourself |
-| An optional trigger | `backup.scheduled: true` adds a busybox `crond` sidecar, a crontab ConfigMap and `shareProcessNamespace: true`, whose job is one SIGUSR2 to the server — a job the sidecar cannot actually run as shipped, see [The scheduled sidecar](#the-scheduled-sidecar) |
+| An optional trigger | `backup.scheduled: true` adds a busybox `crond` sidecar, a crontab ConfigMap and `shareProcessNamespace: true`, whose job is one SIGUSR2 to the server at the scheduled minute — see [The scheduled sidecar](#the-scheduled-sidecar) |
 
 `fullname` is the release name when it already contains `tuwunel`, otherwise `<release>-tuwunel`; `fullnameOverride` replaces both. With release `my-release` the objects are `my-release-tuwunel`, `my-release-tuwunel-data`, `my-release-tuwunel-backup`.
 
-> **Note:** You do not need the sidecar to take a backup. With `backup.enabled: true` and `backup.scheduled: false`, trigger one from the admin room with `!admin server backup-database`. The same group holds `list-backups`, `verify-backup [id]` and `delete-backups <keep>`. The scheduled job does not run as shipped — see [The scheduled sidecar](#the-scheduled-sidecar) and [Triggering a backup without the sidecar](#triggering-a-backup-without-the-sidecar).
+> **Note:** You do not need the sidecar to take a backup. With `backup.enabled: true` and `backup.scheduled: false`, trigger one from the admin room with `!admin server backup-database`. The same group holds `list-backups`, `verify-backup [id]` and `delete-backups <keep>`. See [Triggering a backup without the sidecar](#triggering-a-backup-without-the-sidecar) for the same path from a release that has no sidecar at all.
 
 ## Enabling backups
 
@@ -42,7 +42,7 @@ Set the values, then upgrade:
 backup:
   enabled: true
   size: 20Gi
-  scheduled: true   # renders the cron sidecar; its job does not run as shipped (see below)
+  scheduled: true   # renders the cron sidecar that fires the job on its schedule
   schedule: "0 3 * * *"
   keep: 14
 ```
@@ -58,7 +58,7 @@ The block and its defaults (the full list, with descriptions, is in the [chart R
 | `backup.size` | `5Gi` | Size of the backup claim |
 | `backup.path` | `/backups` | Mount path inside the container **and** `database_backup_path` |
 | `backup.keep` | `7` | `database_backups_to_keep` |
-| `backup.scheduled` | `false` | Adds the cron sidecar, the crontab ConfigMap and `shareProcessNamespace` — a sidecar whose job cannot run as shipped (see [The scheduled sidecar](#the-scheduled-sidecar)) |
+| `backup.scheduled` | `false` | Adds the cron sidecar, the crontab ConfigMap and `shareProcessNamespace`; needs `backup.enabled: true`, and a render with the schedule alone is refused |
 | `backup.schedule` | `0 3 * * *` | Five-field cron expression for the sidecar |
 | `backup.command` | `server backup-database` | The admin command a SIGUSR2 runs (`admin_signal_execute`) |
 | `backup.sidecar.resources` | `10m`/`32Mi` requests, `100m`/`64Mi` limits | Resources for the sidecar (required by the schema) |
@@ -84,7 +84,7 @@ The volume is labelled `app.kubernetes.io/component: tuwunel-backup` and picks u
 `backup.scheduled: true` — together with `backup.enabled: true` — renders three things that only work as a set:
 
 - a ConfigMap `<fullname>-backup-crontabs` whose single entry is `root`, keyed by user name because busybox `crond` reads one file per user out of its spool directory (`-c /etc/crontabs`);
-- a second container named `backup`, image `busybox:1.37` by default, started as `crond -f -l 8 -c /etc/crontabs` (foreground, so the container stays alive), with `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false` and all capabilities dropped;
+- a second container named `backup`, image `busybox:1.37` by default, started as `crond -f -l 8 -c /etc/crontabs` (foreground, so the container stays alive), as root with `SETGID`, `SETUID` and `KILL` added;
 - `shareProcessNamespace: true` on the pod.
 
 The ConfigMap's whole payload is the rendered schedule followed by the signal. With the default schedule it renders exactly:
@@ -95,13 +95,25 @@ data:
     0 3 * * * pkill -USR2 -x tuwunel
 ```
 
-The sidecar's only volume mount is that ConfigMap, at `/etc/crontabs` — a ConfigMap volume, so it is read-only. The container therefore has no writable state at all, and it never mounts the backup volume or touches the repository. It also carries no `runAsUser` of its own, so it inherits the pod's identity: `runAsNonRoot: true`, `runAsUser` and `runAsGroup` `2020`, seccomp `RuntimeDefault` — `crond` itself runs as uid 2020. Its resources come from `backup.sidecar.resources` and the `busybox.image.*` pair is shared with the `helm test` pod, so keep that image multi-arch — a single-arch busybox tag breaks whichever of the two runs on the other architecture.
+The sidecar's only volume mount is that ConfigMap, at `/etc/crontabs` — a ConfigMap volume, so it is read-only. The container therefore has no writable state at all, and it never mounts the backup volume or touches the repository. Its resources come from `backup.sidecar.resources` and the `busybox.image.*` pair is shared with the `helm test` pod, so keep that image multi-arch — a single-arch busybox tag breaks whichever of the two runs on the other architecture.
 
-> **Danger:** The schedule does not work as shipped: the job never executes, and no backup is ever produced by it. busybox `crond` decides which user to run a spool file as from the **name of that file**, and the chart names it `root` — so to run the line, crond must switch identity to root, which uid 2020 cannot do. Under this pod's security context the switch fails with `crond: can't set groups: Operation not permitted` and crond drops the job. No fix hides in the name: with the file called `2020` instead, crond refuses it outright (`crond: ignoring file '2020' (no such user)`) — the name states the identity crond must become, not a value you can choose. The failure is silent in the pod as well, and not because of the log level: busybox `crond` sends its log to syslog (`-S`), which does not run here, and `-l 8` sets a level rather than a sink — crond writes those `crond:` lines to stderr only when asked with `-d`, which the chart does not pass, so `kubectl logs -c backup` stays empty at any `-l` value. What you observe in a cluster is the absence of a `Created database backup...` line in the server container's log and an empty `meta/` under `backup.path`, however long the release has been running. For triggers that do work today, see [Triggering a backup without the sidecar](#triggering-a-backup-without-the-sidecar).
+### Why the sidecar runs as root
 
-The failure was reproduced with the sidecar's own image under the pod's conditions — `docker run --user 2020:2020 --read-only -v vol:/etc/crontabs:ro busybox:1.37 crond -f -d 0 -c /etc/crontabs`, with a root-owned file named `root` in the spool directory holding the rendered line. Because that run asks for stderr (`-d 0`), it prints what the pod's own run keeps in a syslog that is not there: at the minute boundary `crond:` reports the failed identity switch and the job line, and the marker file the command would have written is never created. The other quoted line (`ignoring file '2020'`) comes from the naming experiment, where crond rejects the spool file while loading its directory rather than at the minute boundary. The signal path itself is not in question — the repo's own runtime check exercises it from a container that does not need any identity switch (see [Triggering a backup without the sidecar](#triggering-a-backup-without-the-sidecar)).
+The sidecar is the one container in the release that does not run as the pod's uid 2020. Its container-level `securityContext` sets `runAsUser: 0`, `runAsGroup: 0`, `runAsNonRoot: false` and adds exactly three capabilities on top of `drop: [ALL]` — `SETGID`, `SETUID` and `KILL` — while keeping `readOnlyRootFilesystem: true` and `allowPrivilegeEscalation: false` like the server container. The reason is a property of the tool, not a shortcut:
 
-> **Warning:** The `backup-crontabs` ConfigMap is rendered only when `backup.enabled` **and** `backup.scheduled` are true; the sidecar container and its volume are guarded by `backup.scheduled` alone. `backup.scheduled: true` with `backup.enabled: false` therefore renders a sidecar whose ConfigMap does not exist: `helm template` succeeds and the pod then never starts, because the volume references a missing ConfigMap. Nothing in the schema rejects the combination — see [Troubleshooting](./troubleshooting.md).
+- **`SETGID` and `SETUID`.** busybox `crond` decides which user to run a spool file as from the **name of that file**, and the chart names it `root` (the ConfigMap entry above). Starting the line therefore means switching identity to root, which needs both capabilities — drop either one and crond fails the switch at the minute boundary with `crond: can't set groups: Operation not permitted` and skips the job. Renaming the entry is not an alternative: the name states the identity crond has to become, so any other name just moves the switch to a user the container is not.
+- **`KILL`.** The job is `pkill -USR2 -x tuwunel` and the server runs as uid 2020; a root process needs `CAP_KILL` to signal a process of another user.
+- **root.** An OCI runtime grants capabilities to a root process only, so a container started as 2020 could not hold the three above even if its security context asked for them.
+
+```console
+$ kubectl get pod <fullname>-0 -o jsonpath='{.spec.containers[?(@.name=="backup")].securityContext}'
+```
+
+> **Warning:** `backup.scheduled: true` without `backup.enabled: true` is refused at render time. The ConfigMap the sidecar mounts belongs to the enabled render, and the SIGUSR2 the job sends would run nothing because `admin_signal_execute` is injected only with backups on, so the chart fails instead of emitting a pod that cannot start:
+
+```text
+Error: execution error at (tuwunel/templates/tuwunnel/statefulset.yaml:37:4): backup.scheduled needs backup.enabled: the sidecar mounts the crontab ConfigMap, which only the backups-enabled render creates
+```
 
 > **Warning:** A four-field cron expression is refused by the schema, not silently accepted:
 
@@ -121,7 +133,7 @@ admin_signal_execute = ["server backup-database"]
 
 That is the same command as `!admin server backup-database`, minus the admin room. So the trigger path is:
 
-1. `crond` should fire `pkill -USR2 -x tuwunel` at the scheduled minute — as shipped it never gets that far, because it cannot run the job at all (see [The scheduled sidecar](#the-scheduled-sidecar)); the steps below are what a signal that does arrive sets in motion.
+1. `crond` fires `pkill -USR2 -x tuwunel` at the scheduled minute — the one job in the release that starts as root, for the reasons under [The scheduled sidecar](#the-scheduled-sidecar); everything below is what the signal sets in motion.
 2. `-x` matches **argv\[0\] exactly**, which is why `shareProcessNamespace: true` matters: without a shared PID namespace the sidecar's `pkill` can never see the server process. The value is toggled by the same `backup.scheduled` switch as the sidecar, so the two cannot disagree.
 3. The server runs `server backup-database`, writing a new entry under `<backup.path>/meta/<id>`.
 
@@ -129,7 +141,7 @@ Because `-x` compares argv\[0\] verbatim rather than its basename, the command o
 
 > **Warning:** The SIGUSR2 handler is configured only for `backup.enabled` **and** `backup.scheduled`. Turn the schedule off (or send the signal by hand on an install that never enabled it) and `admin_signal_execute` is absent, so a signal runs nothing at all — with no error anywhere.
 
-> **Warning:** `kubectl logs <pod> -c backup` is not evidence in either direction. crond reports a job it cannot run on stderr, but it logs to syslog by default and the chart passes only `-l 8` (a level, not a sink, and no syslog daemon runs in the pod), so the sidecar log stays empty at any level — an empty sidecar log does not mean a backup ran. Today it is the expected reading, because the scheduled job cannot execute (see [The scheduled sidecar](#the-scheduled-sidecar)). Look at the server container and the repository instead.
+> **Warning:** `kubectl logs <pod> -c backup` is empty in normal operation and proves nothing either way. busybox `crond` logs through syslog (`-S`), which no daemon in the pod serves, and `-l 8` sets a level rather than a sink; crond writes those lines to stderr only when asked with `-d`, which the chart does not pass. So the sidecar log stays empty at any level whether or not the job ran — look at the server container and the repository instead.
 
 Where to look for real evidence:
 
@@ -151,13 +163,13 @@ The second is to send the signal by hand, running the very command the crontab h
 $ kubectl exec my-release-tuwunel-0 -c backup -- pkill -USR2 -x tuwunel
 ```
 
-That reaches the server for the reason the schedule does not: nothing has to change identity. `kubectl exec` starts `pkill` as uid 2020, the server runs as uid 2020, and `shareProcessNamespace: true` (rendered whenever the sidecar is) puts both in one PID namespace — so an ordinary same-user signal, which needs no capability and no `setuid`/`setgid` step, is all it takes. The container to exec into is the sidecar precisely because it is busybox and therefore ships `pkill`; the `tuwunel` container has no shell and no coreutils to run anything with.
+That is the same command the crontab holds, run instead of waiting for the schedule. `kubectl exec` runs the process as the container's user — root, as for `crond` — and the container's `KILL` capability is what lets it signal the server, which runs as uid 2020; `shareProcessNamespace: true` (rendered whenever the sidecar is) puts both in one PID namespace. The container to exec into is the sidecar precisely because it is busybox and therefore ships `pkill`; the `tuwunel` container has no shell and no coreutils to run anything with.
 
 `pkill` prints nothing when it works, and it can also exit `0` without the signal being delivered, so confirm the result from the server's log line or `!admin server list-backups` ([Verifying backups exist](#verifying-backups-exist)) rather than from the exec's silence.
 
-The sidecar exists only under `backup.scheduled: true`, and `admin_signal_execute` is injected only for `backup.enabled` **and** `backup.scheduled` — so this trigger needs that same pair of values. That the signal path works is not a guess: the repo's own runtime check ([hack/runtime-check.sh](../hack/runtime-check.sh)) renders the chart from its backup fixture, starts the server, runs this exact command from a container sharing the server's PID namespace, and requires a `meta/` entry to appear under `backup.path` within 60 seconds. The mechanism is sound; only `crond`'s user switch is not.
+The sidecar exists only under `backup.scheduled: true`, and `admin_signal_execute` is injected only for `backup.enabled` **and** `backup.scheduled` — so this trigger needs that same pair of values. The repo's own runtime check ([hack/runtime-check.sh](../hack/runtime-check.sh)) covers whichever side of the mechanism a fixture exercises: when the rendered schedule can fire inside its 90-second window it starts the *rendered* sidecar — the manifest's own image, command, args, root user and capabilities, with the crontab ConfigMap projected into its spool — and lets `crond` fire the job on its own; for a schedule like `0 3 * * *` it runs this exact command from a container sharing the server's PID namespace, and prints why. Either path has to leave a `meta/` entry under `backup.path`.
 
-Neither trigger repairs the schedule itself. That takes a chart change — run the sidecar as root (a container-level `securityContext` with `runAsUser: 0` and `runAsNonRoot: false`) or replace `crond` with something that does not switch identity — and the pod's `securityContext` is what makes the rendered combination impossible today.
+Both triggers stay useful next to the schedule: the admin room is the documented way to take an ad-hoc backup, and the exec covers a release whose schedule you do not want to wait for. The scheduled path itself needs nothing further — the sidecar's root user and its `SETGID`/`SETUID`/`KILL` set are what let `crond` start the job at all (see [The scheduled sidecar](#the-scheduled-sidecar)).
 
 ## Retention
 

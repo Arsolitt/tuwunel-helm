@@ -53,7 +53,7 @@ metadata:
     app.kubernetes.io/name: tuwunel
     app.kubernetes.io/instance: tuwunel
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: tuwunel-2.0.0
+    helm.sh/chart: tuwunel-2.0.1
     app.kubernetes.io/component: tuwunel
 spec:
   parentRefs:
@@ -92,7 +92,7 @@ metadata:
     app.kubernetes.io/name: tuwunel
     app.kubernetes.io/instance: tuwunel
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: tuwunel-2.0.0
+    helm.sh/chart: tuwunel-2.0.1
     app.kubernetes.io/component: rtc-ingress
 spec:
   parentRefs:
@@ -201,7 +201,7 @@ metadata:
     app.kubernetes.io/name: tuwunel
     app.kubernetes.io/instance: tuwunel
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: tuwunel-2.0.0
+    helm.sh/chart: tuwunel-2.0.1
     app.kubernetes.io/component: rtc-livekit
 spec:
   parentRefs:
@@ -222,7 +222,7 @@ metadata:
     app.kubernetes.io/name: tuwunel
     app.kubernetes.io/instance: tuwunel
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: tuwunel-2.0.0
+    helm.sh/chart: tuwunel-2.0.1
     app.kubernetes.io/component: rtc-livekit
 spec:
   parentRefs:
@@ -380,4 +380,6 @@ The two describe the same host differently, so do not compare their manifests 1:
 
 Prefer the Ingress when the cluster's ingress controller is the standard path, when you want the chart to manage TLS, or when you want the simplest option every controller supports. Prefer Gateway API when a platform team owns the Gateway and its listeners, when you want the RTC media ports carried by routes instead of a LoadBalancer Service, or when you are standardising on `gateway.networking.k8s.io` across services. Migrating between the two is a values change — the paths and the JWT path set are identical — so the [Ingress page](./ingress.md) and [Upgrading](./upgrade.md) cover the value-level steps.
 
-The two templates also read `config.global` differently, which is worth knowing mid-cutover. The Ingress template dereferences the value directly, so a values set that nulls the block — `config: {global: null}`, the way to drop the chart's default `global` table — aborts the render with `Error: tuwunel/templates/tuwunnel/ingress.yaml:6:33 … nil pointer evaluating interface {}.well_known`. The Gateway template reads the same value defensively (`get … | default dict`), so those values render with `gateway.enabled: true` and `ingress.enabled: false`; the route simply omits the delegated hostname. A Gateway cutover can therefore succeed on values the Ingress branch would have refused. With both enabled the Ingress template still owns the render and the release fails, so repair `config.global` before you switch both on.
+The two templates read `config.global` the same defensive way (`get … | default dict`), so a values set that nulls or omits the block — `config: {global: null}`, the way to drop the chart's default `global` table — renders through either path: the delegated hostname is simply left out. Nothing in a cutover depends on which template reads the value, so a values set that renders an Ingress renders an HTTPRoute too.
+
+One difference remains in the output, not in the values: the Ingress is the only object that carries TLS (`ingress.tls` and `ingress.tlsSecretName`). With both enabled during a cutover, the Gateway's listener owns TLS for the routes, and the Ingress keeps its own `spec.tls`.

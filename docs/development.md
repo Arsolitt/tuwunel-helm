@@ -28,12 +28,12 @@ tuwunel-helm/
 │   ├── dependabot.yml             # weekly, grouped GitHub Actions updates
 │   └── PULL_REQUEST_TEMPLATE.md   # what changed / how it was verified / checklist
 ├── charts/tuwunel/                # the chart
-│   ├── Chart.yaml                 # name tuwunel, version 2.0.0, appVersion v1.9.2, kubeVersion '>=1.31.0-0'
+│   ├── Chart.yaml                 # name tuwunel, version 2.0.1, appVersion v1.9.2, kubeVersion '>=1.31.0-0'
 │   ├── values.yaml                # defaults (server_name: "yourdomain.com", image.tag: v1.9.2)
 │   ├── values.schema.json         # applied by every helm command
 │   ├── README.md                  # canonical value reference; ships inside the packaged chart
 │   ├── .helmignore                # excludes ci/ - fixtures never ship
-│   ├── ci/                        # 25 fixtures: 9 scenarios, 12 invalid, 4 invalid-render
+│   ├── ci/                        # 30 fixtures: 12 scenarios, 13 invalid, 5 invalid-render
 │   └── templates/
 │       ├── _helpers.tpl           # named templates (labels, fullname, ...)
 │       ├── NOTES.txt              # post-install notes
@@ -62,9 +62,9 @@ Three folders, one meaning each. The folder is the contract: a fixture in the wr
 
 | Folder | What the fixture must do | Owning job | Count |
 |---|---|---|---|
-| `charts/tuwunel/ci/*-values.yaml` | render `helm template` **and** start its image | `lint`, `runtime` | 9 |
-| `charts/tuwunel/ci/invalid/*.yaml` | be rejected by `values.schema.json` | `schema` | 12 |
-| `charts/tuwunel/ci/invalid-render/*.yaml` | be rejected by a template `fail`, naming the value in its `# expect-error:` line | `schema` | 4 |
+| `charts/tuwunel/ci/*-values.yaml` | render `helm template` **and** start its image | `lint`, `runtime` | 12 |
+| `charts/tuwunel/ci/invalid/*.yaml` | be rejected by `values.schema.json` | `schema` | 13 |
+| `charts/tuwunel/ci/invalid-render/*.yaml` | be rejected by a template `fail`, naming the value in its `# expect-error:` line | `schema` | 5 |
 
 ### Scenarios - `charts/tuwunel/ci/*-values.yaml`
 
@@ -73,14 +73,17 @@ Three folders, one meaning each. The folder is the contract: a fixture in the wr
 | `gateway-media-values.yaml` | RTC media routes on Gateway API with `gateway.enabled: false` (the UDP/TCP routes belong to `rtc.livekit`); LiveKit pod mode, single multiplexed `udp_port: 7882` next to the TCP port `7881` |
 | `gateway-values.yaml` | Gateway API instead of Ingress: two `parentRefs` (one namespaced, one picking a listener by `sectionName`), an extra hostname, a delegated domain derived from `well_known.server` (port dropped), route annotations, and an RTC HTTPRoute that inherits `gateway.parentRefs` |
 | `ingress-federation-values.yaml` | Ingress with a delegated domain, TLS, extra hosts, federation settings, the client-IP knobs behind a proxy, and the pod-level passthrough (annotations, extra volume/mount) |
+| `ingress-tls-values.yaml` | Ingress TLS without a delegated domain, so the TLS host list has to hold `server_name` and the extra host and no empty entry; the previously broken combination |
 | `ipv4-only-values.yaml` | `config.global.address: 0.0.0.0` for a netns without a usable IPv6 stack; no PVC |
 | `minimal-values.yaml` | Smallest supported install: no Ingress, no RTC, `emptyDir` instead of a PVC |
 | `overrides-values.yaml` | Values that worked before `values.schema.json` existed: numeric and string CPU quantities, a quoted service port, a numeric init-container tag, extra/untyped env values, scheduling knobs, labels and annotations |
 | `rtc-pod-network-values.yaml` | LiveKit in pod network mode through a LoadBalancer: single `udp_port` and `externalTrafficPolicy: Local` |
 | `rtc-values.yaml` | RTC enabled with everything the chart derives left unset: no `well_known` block, no `LIVEKIT_URL` / `LIVEKIT_FULL_ACCESS_HOMESERVERS` / `LIVEKIT_JWT_BIND`, no `livekit.config.keys`, no `networkMode` |
-| `storage-and-backup-values.yaml` | S3-backed media storage plus online backups; the runtime job SIGUSR2s this scenario and expects a backup repository under `backup.path` |
+| `scheduled-backup-values.yaml` | Online backups with a per-minute schedule (`* * * * *`), so the runtime job starts the rendered sidecar and lets `crond` fire the job inside its wait window |
+| `service-loadbalancer-values.yaml` | The homeserver Service published by a cloud load balancer: `service.type: LoadBalancer` plus `loadBalancerSourceRanges`, which must render without the headless `clusterIP` |
+| `storage-and-backup-values.yaml` | S3-backed media storage plus online backups on the default `0 3 * * *` schedule; the runtime job falls back to the crontab's own signal for this one and expects a backup repository under `backup.path` |
 
-Two rules shape a scenario. It must render, and the `runtime` job starts its tuwunel container - which is why `overrides-values.yaml` pins `image.tag: v1.9.2` and the init-container tag: the runtime job starts that exact image. Sidecars are never started, and nothing in CI installs a Gateway controller or a Gateway: the media routes are rendered and schema-validated, not exercised.
+Two rules shape a scenario. It must render, and the `runtime` job starts its tuwunel container - which is why `overrides-values.yaml` pins `image.tag: v1.9.2` and the init-container tag: the runtime job starts that exact image. The backup sidecar is the one sidecar the runtime job starts, and only for a scenario whose rendered schedule can fire inside its wait window; nothing in CI installs a Gateway controller or a Gateway: the media routes are rendered and schema-validated, not exercised.
 
 ### Schema-rejected fixtures - `charts/tuwunel/ci/invalid/`
 
@@ -97,6 +100,7 @@ Two rules shape a scenario. It must render, and the `runtime` job starts its tuw
 | `resources-limits-null.yaml` | `resources.limits: null` |
 | `rtc-enabled-without-domain.yaml` | `rtc.enabled: true` without `rtc.domain` |
 | `rtc-network-mode-invalid.yaml` | `rtc.livekit.networkMode: bridge` |
+| `service-type-externalname.yaml` | `service.type: ExternalName` - the chart renders no `externalName`, so the type leaves the schema enum |
 | `unknown-top-level-key.yaml` | `ingres` (a typo'd top-level key) |
 
 ### Template-rejected fixtures - `charts/tuwunel/ci/invalid-render/`
@@ -105,6 +109,7 @@ Not every impossible value is a schema question. Rules that span two values belo
 
 | Fixture | `# expect-error:` | Refused by |
 |---|---|---|
+| `backup-scheduled-without-enabled.yaml` | `backup.enabled` | the statefulset template - the sidecar and its crontab volume are gated on `backup.scheduled`, but the ConfigMap they mount belongs to the backups-enabled render |
 | `config-port-mismatch.yaml` | `config.global.port` | the statefulset template - it sets `TUWUNEL_PORT` from `service.port`, so an environment variable would win over the file and the server would listen on a port the values file does not name |
 | `gateway-without-parentrefs.yaml` | `gateway.enabled needs gateway.parentRefs` | the gateway HTTPRoute template - the chart renders routes that attach to a Gateway you run, it never creates one |
 | `rtc-media-route-without-pod-mode.yaml` | `networkMode=pod` | the udproute template - in hostNetwork mode the media ports are node ports no Service fronts |
@@ -150,7 +155,7 @@ Run these from the repository root. Every one of them is also what CI runs.
 | `helm template … \| kubeconform -strict -summary …` | rendered manifests are valid against a Kubernetes schema |
 | the `ci/invalid/` loop | the schema still refuses these shapes |
 | the `ci/invalid-render/` loop | the templates still refuse these combinations |
-| `hack/runtime-check.sh charts/tuwunel` | the real image starts per scenario, the rendered probe exits 0, the readiness URL answers 200, and the backup path works where the scenario enables it |
+| `hack/runtime-check.sh charts/tuwunel` | the real image starts per scenario, the rendered probe exits 0, the readiness URL answers 200, and the backup path works where the scenario enables it - through the rendered sidecar when its schedule can fire, otherwise through the crontab's own command |
 
 ```console
 $ helm lint --strict charts/tuwunel
@@ -193,9 +198,9 @@ $ helm package charts/tuwunel
 
 | Job | Name | Runs | Protects against |
 |---|---|---|---|
-| `lint` | Lint and validate manifests | `helm lint --strict` for the defaults and every scenario; `helm template` + `kubeconform -strict` for the **default values** and every scenario, on each version in `KUBERNETES_VERSIONS` | a scenario that stops rendering, a manifest that violates the Kubernetes or Gateway API schemas, and a published-default configuration that was never validated |
+| `lint` | Lint and validate manifests | `helm lint --strict` for the defaults and every scenario; `helm template` + `kubeconform -strict` for the **default values** and every scenario, on each version in `KUBERNETES_VERSIONS`; two assertions on the renders themselves - `Service types render an applyable clusterIP` (the headless default is kept, a LoadBalancer renders no `clusterIP`) and `Rendered host lists carry no empty entries` (every `spec.tls[].hosts[]`, `spec.rules[].host` and route `spec.hostnames[]` is a non-empty string) | a scenario that stops rendering, a manifest that violates the Kubernetes or Gateway API schemas, and the two combinations no schema can see: `clusterIP: "None"` is legal on a ClusterIP Service only, and kubeconform's Ingress schema accepts an empty host that the API server refuses |
 | `schema` | Value schema guardrails | every `ci/invalid/*.yaml` must be refused by the schema; every `ci/invalid-render/*.yaml` must be refused by a template and name its value; every scenario must still render | a weakened `values.schema.json` or a dropped template guard |
-| `runtime` | Runtime smoke test against the real image | checkout, the pinned Helm, then `hack/runtime-check.sh "$CHART_DIR"` (`timeout-minutes: 25`) | a config value of the wrong TOML type and a readiness path that answers non-200 - neither is visible to the shape-only jobs |
+| `runtime` | Runtime smoke test against the real image | checkout, the pinned Helm, then `hack/runtime-check.sh "$CHART_DIR"` (`timeout-minutes: 25`) | a config value of the wrong TOML type and a readiness path that answers non-200 - neither is visible to the shape-only jobs; for a schedule that can fire inside the wait window it also starts the rendered backup sidecar, so a sidecar whose job `crond` cannot start fails here |
 | `release` | Release chart | chart-releaser, then `gh release edit` with the CHANGELOG section | an unpublished version bump and a release body that stayed the chart description |
 
 Tool pins live in the workflow `env:` block - one pin per tool, no `@latest` anywhere; Dependabot only bumps the actions.
@@ -229,7 +234,7 @@ The `release` job is gated three ways: `if: github.event_name == 'push' && githu
 3. runs that init container as rendered - same image, command, args and env, every `secretKeyRef` faked with a placeholder - so the config the server reads is produced by the chart's own mechanism;
 4. starts the image with the rendered env, the substituted config mounted where the manifest reads it, and a tmpfs at the rendered database path;
 5. asserts, in order: the container is still running, the *rendered* probe command exits 0, the rendered readiness URL answers 200;
-6. for a config that asks for online backups (`database_backup_path` together with `admin_signal_execute`), runs the crontab command the chart rendered in the server's PID namespace and waits for a backup repository (`meta/`) to appear.
+6. for a config that asks for online backups (`database_backup_path` together with `admin_signal_execute`), drives the backup path the render describes: when the rendered schedule can fire inside a 90-second window it starts the *rendered* sidecar — the manifest's own image, command, args, user and capabilities, with the crontab ConfigMap projected into its spool — and lets `crond` fire the job on its own; a schedule that cannot (say `0 3 * * *`) falls back to running the crontab's command once in the server's PID namespace, and prints why. Either path has to leave a `meta/` entry under `backup.path`.
 
 The rule that matters when you change a manifest: it reads images, env names, paths, probes and the readiness URL out of the render, and hardcodes none of them. If the script needs to know something the manifests do not say, that is a bug in the manifests. When the render stops naming something, the script fails with an explicit message instead of guessing:
 
@@ -243,15 +248,16 @@ The rule that matters when you change a manifest: it reads images, env names, pa
 |---|---|
 | container still running | `the container exited on its own (exit code <n>) instead of serving` |
 | probe command and readiness URL | whichever deadline expires first: `the readiness path never answered 200 within 180s` while no 200 has been seen, otherwise `the rendered probe command never exited 0 within 180s` |
-| backup signal | `the rendered crontab command (<cmd>) failed in the server's PID namespace` |
-| backup repository | `no backup repository (meta/) appeared under <path> within 60s of the rendered crontab's signal` |
+| backup sidecar start | the rendered sidecar could not be started from `<image>`, or its crontab could not be projected into the spool directory |
+| backup signal (fallback path) | `the rendered crontab command (<cmd>) failed in the server's PID namespace` |
+| backup repository | `no backup repository (meta/) appeared under <path> within 90s of` the path that was driven - the rendered sidecar's job, or the rendered crontab's signal |
 
 ```console
 $ hack/runtime-check.sh charts/tuwunel
 $ RUNTIME_CHECK_TIMEOUT=300 hack/runtime-check.sh charts/tuwunel
 ```
 
-Usage is `hack/runtime-check.sh [chart-dir]`, defaulting to `charts/tuwunel`; `RUNTIME_CHECK_TIMEOUT` is the ready budget per fixture and defaults to 180 seconds. The script preflights `docker`, `helm` and `python3` on `PATH`, a reachable Docker daemon, a `python3` with `pyyaml`, and the chart directory - each exits 2. It fails on the first failing scenario (exit 1) and prints the scenario, the image, the failed assertion and the server's last 30 log lines.
+Usage is `hack/runtime-check.sh [chart-dir]`, defaulting to `charts/tuwunel`; `RUNTIME_CHECK_TIMEOUT` is the ready budget per fixture and defaults to 180 seconds. The script preflights `docker`, `helm` and `python3` on `PATH`, a reachable Docker daemon, a `python3` with `pyyaml`, and the chart directory - each exits 2. It fails on the first failing scenario (exit 1) and prints the scenario, the image, the failed assertion and the server's last 30 log lines - plus, when the run started the backup sidecar, its state and its last 20 log lines.
 
 Every scenario gets a unique container name and scratch directory derived from `GITHUB_RUN_ID` or the shell PID, world-writable mounts (the pod's uid writes them), and a cleanup trap that removes the container on success, failure and interrupt. An empty scenario glob is a failure of the script itself:
 

@@ -141,7 +141,7 @@ The upgrade procedure itself, including chart-version migrations, is in [Upgradi
 
 The rule, from the template: a string limit is read as a CPU quantity in millicores — a trailing `m` is stripped, and a value containing `.` is `ceil`ed and multiplied by 1000 — and that millicore count is then divided by 1000, rounding up to whole threads unless it divides evenly. A non-string (plain YAML number) limit is used as the thread count literally.
 
-Measured by rendering the chart (v2.0.0) with each form:
+Measured by rendering the chart (v2.0.1) with each form:
 
 | `resources.limits.cpu` | Rendered threads | Note |
 | --- | --- | --- |
@@ -240,7 +240,7 @@ $ kubectl get events --field-selector involvedObject.name=<fullname>-0 --sort-by
 
 The running file is `/tmp/config/config.toml` (`TUWUNEL_CONFIG`), written at pod start by `config-processor` from the ConfigMap — and the chart's environment variables outrank it. Since the image has no shell you read those two inputs rather than the file. For the server's own view of its live configuration, use the admin room: `!admin server show-config` prints configuration values, with `!admin server uptime` and `!admin server memory-usage` alongside it (commands in the console's `server` group, the same group as the backup commands in [Backups and restore](./backups.md)).
 
-Two things that look like problems and are not: `helm test` leaves its `Completed` pod `<fullname>-test-connection` behind (it is deleted before the next hook creation), and the sidecar's logs do not prove a backup ran — check the repository with `!admin server list-backups` instead.
+Two things that look like problems and are not: `helm test` leaves its `Completed` pod `<fullname>-test-connection` behind (it is deleted before the next hook creation), and the sidecar's logs are empty whether or not its job ran — busybox `crond` logs through a syslog the pod does not run, so check the repository with `!admin server list-backups` instead.
 
 RTC deployments expose their own component labels when `rtc.enabled` is set:
 
@@ -264,7 +264,7 @@ Both RTC Deployments are pinned to one replica as well. LiveKit cannot be scaled
 | Task | Cadence | Command |
 | --- | --- | --- |
 | Verify backups exist and are readable | weekly, and after any schedule change | `!admin server list-backups`, `!admin server verify-backup` in the admin room — see [Backups and restore](./backups.md) |
-| Confirm the scheduled backup is armed | after editing `backup.*` | `kubectl exec <fullname>-0 -c backup -- cat /etc/crontabs/root` (expect `<schedule> pkill -USR2 -x tuwunel`, the crontab the sidecar reads); what the scheduled path currently does is documented in that guide |
+| Confirm the scheduled backup is armed | after editing `backup.*` | `kubectl exec <fullname>-0 -c backup -- cat /etc/crontabs/root` (expect `<schedule> pkill -USR2 -x tuwunel`, the crontab `crond` fires); the job itself is described in that guide |
 | Storage headroom (data and backup claims) | weekly | `kubectl get pvc -l app.kubernetes.io/instance=my-release` plus the kubelet's `kubelet_volume_stats_used_bytes` / `kubelet_volume_stats_capacity_bytes` |
 | Image / CVE bump of the server | per upstream release | `helm upgrade my-release tuwunel/tuwunel -f values.yaml --set image.tag=v<X.Y.Z>` then `helm test my-release` (never below v1.9.0) |
 | Log review | weekly | `kubectl logs <fullname>-0 -c tuwunel --since=24h \| grep -E 'ERROR\|WARN'` |

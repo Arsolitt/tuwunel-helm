@@ -33,17 +33,17 @@ spec:
   type: ClusterIP
 ```
 
-`spec.clusterIP` is rendered unconditionally from `service.clusterIP`, whose default is the string `None`, because the StatefulSet names this Service as its governing service. Exposure is a separate object: an Ingress (this page) or a Gateway API route (see [Exposing the homeserver with Gateway API](./gateway-api.md)).
+`spec.clusterIP` is rendered from `service.clusterIP`, whose default is the string `None`, because the StatefulSet names this Service as its governing service — and `None` (a headless Service) is only legal on a `ClusterIP` Service. A `NodePort`/`LoadBalancer` therefore renders the field only when it names an explicit address, and omits it otherwise so the cluster allocates a VIP. Exposure is a separate object: an Ingress (this page) or a Gateway API route (see [Exposing the homeserver with Gateway API](./gateway-api.md)).
 
 | Value | Default | Notes |
 | --- | --- | --- |
 | `service.port` | `8080` | The chart's single port knob: the Service port, the Ingress backend, the container port and `TUWUNEL_PORT` all come from it |
-| `service.type` | `ClusterIP` | Rendered verbatim; `NodePort`/`LoadBalancer` cannot be combined with the default `clusterIP` (see below) |
-| `service.clusterIP` | `None` | Set to `""` to get a normal (non-headless) Service |
+| `service.type` | `ClusterIP` | Rendered verbatim; `NodePort`/`LoadBalancer` install as configured (no `clusterIP` unless you set one). `ExternalName` is not offered — the chart has no `externalName` value and the schema refuses it |
+| `service.clusterIP` | `None` | `None` keeps the Service headless, which is what the StatefulSet needs and what only a `ClusterIP` Service may carry. On a `ClusterIP` Service an address — or `""`, letting the cluster allocate — pins a VIP; on `NodePort`/`LoadBalancer`, `None`/`""` omit the field |
 | `service.annotations` | `{}` | Rendered only when non-empty |
-| `service.externalIPs` | `[]` | Rendered only when non-empty |
-| `service.loadBalancerIP` | `""` | Rendered only when set |
-| `service.loadBalancerSourceRanges` | `[]` | Rendered only when non-empty |
+| `service.externalIPs` | `[]` | Rendered only when non-empty, on any type |
+| `service.loadBalancerIP` | `""` | `LoadBalancer` only, rendered when set |
+| `service.loadBalancerSourceRanges` | `[]` | `LoadBalancer` only, rendered when non-empty |
 
 The Service exposes one port named `http` and points at the named container port `http`. The full reference is in the [chart README § Service Configuration](../charts/tuwunel/README.md#service-configuration).
 
@@ -71,13 +71,21 @@ at '/service': additional properties 'externalTrafficPolicy' not allowed
 
 If you expected that knob because you came from a WebRTC deployment, it lives under `rtc.livekit.service`, where it defaults to `Cluster`.
 
-> **Warning:** `service.type: LoadBalancer` or `NodePort` on its own cannot be installed. The chart still renders `clusterIP: "None"`, and the API server rejects the combination:
->
-> ```text
-> The Service "ci-tuwunel" is invalid: spec.clusterIPs[0]: Invalid value: "None": may not be set to 'None' for LoadBalancer services
-> ```
->
-> If you want to expose the Service directly instead of using an Ingress, also clear the field — `--set service.type=LoadBalancer --set service.clusterIP=` — which renders `clusterIP: ""` and is accepted.
+> **Note:** `service.type: NodePort` or `LoadBalancer` installs as configured. The chart renders no `clusterIP` for those types unless `service.clusterIP` names an explicit address — the headless `None` default is legal on a `ClusterIP` Service only — and `loadBalancerIP`/`loadBalancerSourceRanges` render for a `LoadBalancer` alone, so a leftover value cannot leak into a `ClusterIP` or `NodePort` render. This is what the CI fixture renders, source ranges included:
+
+```yaml
+spec:
+  loadBalancerSourceRanges:
+    - 203.0.113.0/24
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8080
+      targetPort: http
+  type: LoadBalancer
+```
+
+> **Tip:** The headless `None` is what gives the StatefulSet its stable per-pod DNS, so keep it unless you have a reason not to. For an ordinary (non-headless) `ClusterIP` Service, leave `service.type` at `ClusterIP` and set `service.clusterIP: ""` — the cluster allocates a VIP.
 
 ## Enabling an Ingress
 
@@ -145,7 +153,7 @@ There is no `ingress.hosts` value. The host list is derived: `server_name` is al
 `ingress.tls` is a boolean, not a list of hosts. When it is true the chart renders one `spec.tls` entry whose hosts are, in this order:
 
 1. `server_name`,
-2. the delegated domain derived from `config.global.well_known.server`,
+2. the delegated domain derived from `config.global.well_known.server` — only when that block sets one,
 3. every `ingress.extraHosts` entry.
 
 The list is **not** deduplicated, so delegating to your own `server_name` renders that host twice. The secret name is `ingress.tlsSecretName`, or `<fullname>-tls` when the value is empty.
@@ -163,13 +171,18 @@ ingress:
 
 The chart also renders no redirect and no forced-HTTPS behaviour: `ingress.annotations` is passed through verbatim, so HTTP→HTTPS redirection is a controller concern, not a chart feature. Write your published URLs as `https://` — the chart's own delegation example uses `client: "https://matrix.example.com"` and `server: "matrix.example.com:443"` (the exact shapes belong to [Federation and delegation](./federation.md)).
 
-> **Danger:** `ingress.tls: true` without `config.global.well_known.server` renders an Ingress the API server refuses, because the TLS host list contains an empty entry:
->
-> ```text
-> The Ingress "ci-tuwunel" is invalid: spec.tls[0].hosts[1]: Invalid value: "": a lowercase RFC 1123 subdomain must consist of lower case alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character (e.g. 'example.com', regex used for validation is '[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*')
-> ```
->
-> This is why the chart README's own ingress examples cannot be installed as written (they set `tls: true` with no `well_known` block). Either set `config.global.well_known.server`, or leave `ingress.tls: false` — with the value false no `spec.tls` key is rendered at all and the manifest is valid.
+> **Note:** `ingress.tls: true` installs with or without delegation: the delegated host joins `spec.tls.hosts` only when `config.global.well_known.server` is set, so a non-delegated install renders a TLS block holding `server_name` and your `ingress.extraHosts`, and nothing else. The CI fixture for exactly that case renders:
+
+```yaml
+spec:
+  tls:
+    - hosts:
+        - matrix.ci.example
+        - alias.ci.example
+      secretName: ci-tuwunel-tls
+```
+
+> Enabling delegation later adds its host to that list automatically, so no `ingress` value changes with it.
 
 ## Serving the Matrix hostnames
 
@@ -307,7 +320,7 @@ Creating the first account is a registration concern, not an ingress one — see
 | Symptom | Where to look |
 | --- | --- |
 | `helm install` aborts with "If ingress.enabled is set to true, ingress.class is required", or with the `config.global.port`/`server_name` equality message | [Rejected at render time (template guards)](./troubleshooting.md#rejected-at-render-time-template-guards) |
-| The API server refuses the Ingress (`spec.tls[0].hosts[1]: Invalid value: ""`) or the Service (`may not be set to 'None' for LoadBalancer services`) | [Apply-time rejections](./troubleshooting.md#apply-time-rejections) |
+| `service.type: ExternalName` is refused by the schema (`value must be one of 'ClusterIP', 'NodePort', 'LoadBalancer'`) | [Rejected before render (schema)](./troubleshooting.md#rejected-before-render-schema) |
 | Everything worked until delegation was switched on; now other endpoints on the apex host return no route / 404 | [Delegation narrowed the server_name host](./troubleshooting.md#delegation-narrowed-the-server-name-host) |
 | Requests fail with `500 M_UNKNOWN` / `Can't extract client IP from configured ip_source`, or every client has the same IP in the logs | [Client IP and ip_source](./troubleshooting.md#client-ip-and-ip_source) |
 | Peers or clients cannot find the server at all, well-known documents missing | [Exposure and federation](./troubleshooting.md#exposure-and-federation) |

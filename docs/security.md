@@ -253,7 +253,7 @@ value to override any of these blocks.
 
 | Workload (name) | Pod securityContext | Container securityContext | Writable paths |
 | --- | --- | --- | --- |
-| tuwunel StatefulSet (`<fullname>`) | `runAsNonRoot: true`, `runAsUser: 2020`, `runAsGroup: 2020`, `fsGroup: 2020`, `fsGroupChangePolicy: OnRootMismatch`, `seccompProfile: RuntimeDefault` | `tuwunel` and the `backup` sidecar: `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]` | `/data` (PVC or emptyDir), `/tmp` and `/tmp/config` (emptyDir) |
+| tuwunel StatefulSet (`<fullname>`) | `runAsNonRoot: true`, `runAsUser: 2020`, `runAsGroup: 2020`, `fsGroup: 2020`, `fsGroupChangePolicy: OnRootMismatch`, `seccompProfile: RuntimeDefault` | `tuwunel`: `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`. `backup` (only with `backup.scheduled`): the same three, plus `runAsUser: 0`, `runAsGroup: 0`, `runAsNonRoot: false` and `capabilities.add: [SETGID, SETUID, KILL]` - see below | `/data` (PVC or emptyDir), `/tmp` and `/tmp/config` (emptyDir) |
 | init container `config-processor` (same pod) | inherits the pod block above | none of its own - no container-level `securityContext` | `/tmp/config-template` (read-only ConfigMap), `/tmp/config`, `/tmp` |
 | RTC JWT Deployment (`<fullname>-jwt`) | `runAsNonRoot: true`, `runAsUser: 1000`, `runAsGroup: 1000`, `seccompProfile: RuntimeDefault` | `jwt-service`: `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]` | `/tmp` (emptyDir) |
 | LiveKit Deployment (`<fullname>-livekit`) | `seccompProfile: RuntimeDefault` only | `config-processor` and `livekit`: `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]` | `/tmp/config` and `/tmp` (emptyDir) |
@@ -262,6 +262,16 @@ value to override any of these blocks.
 The emptyDir mounts exist because the root filesystem is read-only: `/tmp` and `/tmp/config` are
 where the init container writes the substituted configuration and where the server and sidecar keep
 scratch state. `/data` is the mount the database lives on.
+
+> **Note:** The `backup` sidecar is the one privileged container the chart renders, and only under
+> `backup.scheduled: true`. busybox `crond` runs a spool file as the user the file is *named* after
+> — the chart names it `root` — so the job cannot start without `SETGID`/`SETUID`; signalling the
+> server, which runs as uid 2020, needs `KILL`; and an OCI runtime grants capabilities to a root
+> process only, so the container starts as root to hold them. Everything else about it is the same
+> as the server container: `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false`, all
+> other capabilities dropped, no Secret and no writable mount — its only mount is the read-only
+> crontab ConfigMap, and it never sees `data` or the backup volume. The reasoning in full is in
+> [Backups and restore](./backups.md#the-scheduled-sidecar).
 
 > **Note:** The LiveKit pod is the one workload without `runAsNonRoot`/`runAsUser` at pod level - an
 > observed difference in the template, not a documented decision. Its containers are still
@@ -324,8 +334,10 @@ pod, and the RTC workloads carry their own under `rtc.jwt.*` / `rtc.livekit.*`. 
   under the namespace's default ServiceAccount with a mounted token; there is no
   `automountServiceAccountToken: false` anywhere.
 - **No PodSecurity admission configuration.** The chart writes no namespace labels and no Pod
-  Security fields, so enforcement is whatever the namespace already carries - and the LiveKit pod
-  without a pod-level `runAsNonRoot` (above) is the one to check first.
+  Security fields, so enforcement is whatever the namespace already carries. Two objects to check
+  before switching a namespace to `restricted`: the LiveKit pod, which has no pod-level
+  `runAsNonRoot` (above), and the StatefulSet under `backup.scheduled`, which carries the root
+  `backup` container with three added capabilities (above).
 - **No exposure beyond the cluster.** The Service is a headless `ClusterIP` (`clusterIP: "None"`),
   so the homeserver is reachable only in-cluster until you add an Ingress, a Gateway route or
   another Service type; the container binds `service.port` (8080), never a privileged port.
@@ -346,7 +358,8 @@ pod, and the RTC workloads carry their own under `rtc.jwt.*` / `rtc.livekit.*`. 
       which the chart does not cover.
 - [ ] A default-deny NetworkPolicy and `automountServiceAccountToken: false` are applied at
       namespace level, since the chart ships neither.
-- [ ] Pod Security admission, if you use it, accepts the LiveKit pod (no `runAsNonRoot`).
+- [ ] Pod Security admission, if you use it, accepts the LiveKit pod (no `runAsNonRoot`) and — with
+      `backup.scheduled` — the root `backup` sidecar with its three capabilities.
 - [ ] You know that a rotated Secret needs a manual `kubectl rollout restart` (or a pod deletion) to
       take effect, while a `config`/`env` edit in the values file rolls the pod on its own, because
       `checksum/config` changes.

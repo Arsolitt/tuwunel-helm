@@ -188,7 +188,7 @@ Without `well_known.server`, the same Ingress renders one host and one catch-all
 
 > **Warning:** Enabling delegation narrows what the `server_name` host serves — but both rules on that host are `Prefix` rules, `/.well-known/matrix` and `/_matrix`, so everything underneath them stays routed on the apex host, `/.well-known/matrix/support` and the client API at `/_matrix/client/*` included. What moves to the delegated host's `/` rule is every path outside those two prefixes: `/_tuwunel/server_version`, the admin surface (`/_synapse/admin/*`, `/_synapse/mas/*`), `/.well-known/openid-configuration`, and anything else the server registers at another root. See [Troubleshooting](./troubleshooting.md).
 
-> **Note:** The Ingress template dereferences `.Values.config.global.well_known.server` directly, while the Gateway template guards the same lookup. A values set that nulls `config.global` fails with `nil pointer evaluating interface {}.well_known` at `ingress.yaml:6` when the Ingress is enabled, and renders fine through the Gateway route.
+> **Note:** Both exposure templates read `.Values.config.global.well_known.server` defensively (`get … | default dict`), so a values set that nulls `config.global` renders with either or both enabled — the delegated host is simply treated as absent.
 
 ### Gateway API instead of an Ingress
 
@@ -333,7 +333,7 @@ If the port-forward answer is correct but the public host is not, the difference
 | `config.global.well_known.server` | unset | Bare `host:port` → `m.server`; also drives the delegated host in the Ingress/HTTPRoute |
 | `config.global.server_name` | unset | Compatibility only; must equal `server_name` |
 | `service.port` | `8080` | The only port; the port federation arrives on |
-| `service.type` / `service.clusterIP` | `ClusterIP` / `"None"` | Headless; exposure comes from an Ingress/route or your own type override |
+| `service.type` / `service.clusterIP` | `ClusterIP` / `"None"` | Headless; exposure comes from an Ingress/route. An override to `NodePort`/`LoadBalancer` installs as configured and renders no `clusterIP` unless you set one |
 | `ingress.enabled` / `class` / `path` / `tls` / `extraHosts` | `false` / `""` / `"/"` / `false` / `[]` | Delegation changes the rules and TLS hosts these render |
 
 The complete value list, including the client-IP keys a proxied federation deployment needs, is in the chart reference: [chart README § Tuwunel Configuration](../charts/tuwunel/README.md#tuwunel-configuration) and [§ Ingress Configuration](../charts/tuwunel/README.md#ingress-configuration).

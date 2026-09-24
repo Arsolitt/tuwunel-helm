@@ -19,9 +19,9 @@
 
 `charts/tuwunel/Chart.yaml` carries three version numbers, and each one gates something different:
 
-| Field | Value in chart 2.0.0 | What it decides |
+| Field | Value in chart 2.0.1 | What it decides |
 | --- | --- | --- |
-| `version` | `2.0.0` | The chart release. The git tag and the published index entry are `tuwunel-2.0.0`. |
+| `version` | `2.0.1` | The chart release. The git tag and the published index entry are `tuwunel-2.0.1`. |
 | `appVersion` | `v1.9.2` | Metadata only: the tuwunel release the defaults target. The image the pod runs comes from `image.tag` (default `v1.9.2`) — no template reads `appVersion`. |
 | `kubeVersion` | `>=1.31.0-0` | Enforced by Helm before anything is rendered. A cluster below 1.31 cannot take the chart at all. `kubeVersion` was introduced by 2.0.0. |
 
@@ -81,9 +81,9 @@ that the rest of this page deals with.
    migration documentation states the caution plainly: "Always back up your database before
    migrating." This repository does not itself instruct you to back up before an upgrade — the advice
    is upstream's, and the chart only provides the mechanism.
-2. **Read the target version's notes.** For 2.0.0 that is the chart README's own upgrade section
-   (shipped in the package, readable with `helm show readme` as shown above) plus the release body.
-   The repository changelog is [`../CHANGELOG.md`](../CHANGELOG.md).
+2. **Read the target version's notes.** For the 2.0.x line that is the chart README's own upgrade
+   section (shipped in the package, readable with `helm show readme` as shown above) plus the release
+   body. The repository changelog is [`../CHANGELOG.md`](../CHANGELOG.md).
 3. **Check that the released version has a `## [<version>]` section in `CHANGELOG.md`.** The `release`
    job copies that section into the GitHub release body, so a release without one means the release
    notes are missing even though the chart is published — and the job itself goes red after
@@ -273,9 +273,9 @@ Lines worth recognising in the output:
 | The image actually running | `kubectl get pod -l app.kubernetes.io/name=tuwunel -o jsonpath='{.items[0].spec.containers[0].image}'` | The whole contract depends on a v1.9.0-or-newer image; this shows the tag in use rather than the one you meant to set |
 | Registration state | `POST https://<server_name>/_matrix/client/v3/register` | `403 M_FORBIDDEN: Registration has been disabled.` is the expected answer while registration is closed; an enabled token flow answers `401` with `m.login.registration_token` and no token supplied |
 | Probe and log noise | `kubectl logs statefulset/my-release-tuwunel` | Unknown-parameter warnings tell you a removed key survived the migration |
-| Exposure | your existing Ingress or Gateway routes | The upgrade re-renders them from your values. Gateway API exposure is opt-in in 2.0.0 (`gateway.enabled` is `false` by default), so an Ingress install is not moved onto a Gateway by upgrading — see [Exposing the homeserver with Gateway API](./gateway-api.md) |
+| Exposure | your existing Ingress or Gateway routes | The upgrade re-renders them from your values. Gateway API exposure is opt-in since 2.0.0 (`gateway.enabled` is `false` by default), so an Ingress install is not moved onto a Gateway by upgrading — see [Exposing the homeserver with Gateway API](./gateway-api.md) |
 | RTC, if enabled | `curl https://<server_name>/_matrix/client/unstable/org.matrix.msc4143/rtc/transports` and `kubectl logs -l app.kubernetes.io/component=rtc-jwt` | An empty `rtc_transports` list means `config.global.well_known.livekit_url` is missing from the rendered config, not that LiveKit is down |
-| Backups, if enabled | trigger one by hand - `kubectl exec my-release-tuwunel-0 -c backup -- pkill -USR2 -x tuwunel` (or `!admin server backup-database`) | The chart's scheduled sidecar cannot fire as rendered, so waiting for a schedule is not a check - see [Backups and restore](./backups.md#the-scheduled-sidecar). The evidence is the server's `Created database backup...` line and the repository under the backup path |
+| Backups, if enabled | `!admin server list-backups`, or an ad-hoc signal - `kubectl exec my-release-tuwunel-0 -c backup -- pkill -USR2 -x tuwunel` | The evidence is the server's `Created database backup...` line and the repository under the backup path; the sidecar's own log stays empty either way, because crond logs to a syslog the pod does not run - see [Backups and restore](./backups.md#the-scheduled-sidecar) |
 
 ## Rolling back
 

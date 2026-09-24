@@ -234,7 +234,7 @@ It is the **concatenation of two `sha256sum`s** — the first 64 characters hash
 
 > **Warning:** `podAnnotations` is rendered *after* `checksum/config`, so setting `podAnnotations["checksum/config"]` yourself produces a duplicate YAML key whose last occurrence wins — and the chart's roll trigger is silently replaced. Editing `config` then stops rolling the pod.
 
-`backup.scheduled: true` additionally sets `shareProcessNamespace: true` on the pod, because the crond sidecar signals the server by name (`pkill -USR2 -x tuwunel`) from the ConfigMap-provided crontab ([Backups and restore](./backups.md)).
+`backup.scheduled: true` additionally sets `shareProcessNamespace: true` on the pod, because the crond sidecar signals the server by name (`pkill -USR2 -x tuwunel`) from the ConfigMap-provided crontab — and the sidecar itself runs as root with `SETGID`/`SETUID`/`KILL` added, since crond starts a spool file as the user that file is named after ([Backups and restore](./backups.md#the-scheduled-sidecar)).
 
 The test hook adds one Pod that plain `helm template` already shows: `<fullname>-test-connection`, a busybox container running `wget -q --spider http://<fullname>.<namespace>.svc:<service.port>/_tuwunel/server_version` as UID/GID `65534`, annotated `helm.sh/hook: test` with `helm.sh/hook-delete-policy: before-hook-creation`. It is created only by `helm test` and deleted before the next hook creation, so its absence from a live cluster is expected ([Day-2 operations](./operations.md)).
 
@@ -247,7 +247,7 @@ Each row was checked against the rendered output of the CI scenarios and against
 | No CRDs and no `crds/` directory | `charts/tuwunel/` contains only `Chart.yaml`, `.helmignore`, `README.md`, `values.yaml`, `values.schema.json`, `ci/` and `templates/` |
 | No Gateway or GatewayClass | The Gateway API templates render only `HTTPRoute`, `TCPRoute` and `UDPRoute`; attaching to a Gateway you run is the contract ([Gateway API](./gateway-api.md)) |
 | No database bootstrap Job, no wait-for-database init container | The pod has exactly one init container (`config-processor`) and it never mounts the data volume; the server migrates itself on first start, which is what the startup probe budget covers |
-| No NetworkPolicy | No `NetworkPolicy` (and no PodDisruptionBudget, HPA, ServiceAccount/RBAC, ServiceMonitor or Job) appears in any of the nine scenario renders |
+| No NetworkPolicy | No `NetworkPolicy` (and no PodDisruptionBudget, HPA, ServiceAccount/RBAC, ServiceMonitor or Job) appears in any of the twelve scenario renders |
 | No high availability | `replicas` is hardcoded to `1` on the StatefulSet and both RTC Deployments; the release notes warn that scaling the StatefulSet risks quiet data corruption, and nothing in the chart stops two writers on one RocksDB directory |
 | No validation of the configuration *contents* | `config` is a free-form object; a nested mapping where upstream wants an array of tables — `config.global.identity_provider` written as a YAML mapping — passes `helm lint` and renders `[global.identity_provider]`, and stops the server at startup instead ([Troubleshooting](./troubleshooting.md), [Configuring the server](./configuration.md)) |
 
