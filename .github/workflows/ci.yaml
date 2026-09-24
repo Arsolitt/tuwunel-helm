@@ -193,11 +193,20 @@ jobs:
             shift
             helm template ci "$CHART_DIR" "$@" > "$manifest"
             python3 - "$manifest" "$label" <<'PY'
+          import re
           import sys
           import yaml
 
           path, label = sys.argv[1], sys.argv[2]
+          # A host field the API server accepts is an RFC 1123 subdomain, with a
+          # wildcard prefix allowed; a port, a scheme or an empty entry is not.
+          host_re = re.compile(r"^(\*\.)?[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$")
           empty = []
+
+          def check(where, value):
+              if not isinstance(value, str) or not host_re.match(value):
+                  empty.append(f"{label}: {where} is not a hostname ({value!r})")
+
           for doc in yaml.safe_load_all(open(path)):
               if not isinstance(doc, dict):
                   continue
@@ -206,19 +215,16 @@ jobs:
               if kind == "Ingress":
                   for i, tls in enumerate(spec.get("tls") or []):
                       for j, host in enumerate((tls or {}).get("hosts") or []):
-                          if not isinstance(host, str) or not host.strip():
-                              empty.append(f"{label}: Ingress/{name} spec.tls[{i}].hosts[{j}]")
+                          check(f"Ingress/{name} spec.tls[{i}].hosts[{j}]", host)
                   for i, rule in enumerate(spec.get("rules") or []):
-                      host = (rule or {}).get("host")
-                      if host is not None and not str(host).strip():
-                          empty.append(f"{label}: Ingress/{name} spec.rules[{i}].host")
+                      if rule and "host" in rule:
+                          check(f"Ingress/{name} spec.rules[{i}].host", rule.get("host"))
               elif kind in ("HTTPRoute", "UDPRoute", "TCPRoute"):
                   for j, host in enumerate(spec.get("hostnames") or []):
-                      if not isinstance(host, str) or not host.strip():
-                          empty.append(f"{label}: {kind}/{name} spec.hostnames[{j}]")
+                      check(f"{kind}/{name} spec.hostnames[{j}]", host)
           if empty:
               for entry in empty:
-                  print(f"::error::an empty host is rendered where the API server requires a name - {entry}")
+                  print(f"::error::a host field the API server refuses is rendered - {entry}")
               sys.exit(1)
           PY
           }
