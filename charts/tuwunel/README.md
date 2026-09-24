@@ -181,12 +181,23 @@ value as `TUWUNEL_ADDRESS`.
 | Parameter                          | Description                                                                                 | Default                            |
 | ---------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------- |
 | `service.annotations`              | Annotations for Service resource                                                            | `{}`                               |
-| `service.type`                     | Type of service to deploy                                                                   | `ClusterIP`                        |
-| `service.clusterIP`                | ClusterIP of service; `None` is the headless service the StatefulSet needs                   | `None`                             |
-| `service.port`                     | Port to expose service; the chart's single port knob                                         | `8080`                             |
+| `service.type`                     | Type of service: `ClusterIP`, `NodePort` or `LoadBalancer` (`ExternalName` unsupported)     | `ClusterIP`                        |
+| `service.clusterIP`                | `None` makes it headless (what the StatefulSet needs); rendered for `ClusterIP` only        | `None`                             |
+| `service.port`                     | Port to expose service; the chart's single port knob                                        | `8080`                             |
 | `service.externalIPs`              | External IPs for service                                                                    | `[]`                               |
-| `service.loadBalancerIP`           | Load balancer IP                                                                            | `""`                               |
-| `service.loadBalancerSourceRanges` | List of IP CIDRs allowed to access the load balancer                                        | `[]`                               |
+| `service.loadBalancerIP`           | Load balancer IP; rendered when `type` is `LoadBalancer`                                    | `""`                               |
+| `service.loadBalancerSourceRanges` | List of IP CIDRs allowed to access the load balancer; `LoadBalancer` only                   | `[]`                               |
+
+`service.type` accepts `ClusterIP`, `NodePort` and `LoadBalancer`. `ExternalName` is not one of
+them: the chart renders no `externalName`, so a Service of that type could never be valid.
+
+The default `service.clusterIP: "None"` makes the Service headless. That is what the StatefulSet
+needs - the Service governs it and provides the pod's stable DNS name - and an explicit address
+works as well. `clusterIP` is rendered for a `ClusterIP` Service only: the API server rejects
+`None` on `NodePort` and `LoadBalancer`, so those types get the field only when it names an
+address. Leave it at `None` (or empty) there and the cluster allocates the VIP; set an address to
+pin it. `loadBalancerIP` and `loadBalancerSourceRanges` are rendered for a `LoadBalancer` only,
+`externalIPs` for every type.
 
 `service.port` is rendered into the Service, the Ingress backends, the container port and
 `TUWUNEL_PORT`. Setting `config.global.port` to a different number fails the render instead of
@@ -203,6 +214,13 @@ being ignored (see [Upgrading to 2.0.0](#upgrading-to-200)).
 | `ingress.extraHosts`         | Additional hostnames                                  | `[]`          |
 | `ingress.tls`                | Whether to configure TLS for the ingress              | `false`       |
 | `ingress.tlsSecretName`      | TLS secret name (defaults to `<release-name>-tls`)    | `""`          |
+
+`ingress.tls: true` adds one `spec.tls` entry covering every hostname the rules serve:
+`server_name`, the delegated domain from `config.global.well_known.server` when one is set, and
+`ingress.extraHosts`. A delegated domain is not required for TLS - without one the list is
+`server_name` plus the extra hosts - and the certificate has to cover each name (through
+cert-manager annotations issuing it, for example). Setting `ingress.extraHosts` adds a hostname to
+both the rules and that list.
 
 ### Gateway API
 
@@ -338,7 +356,7 @@ What `backup.enabled: true` renders:
 - `database_backup_path` and `database_backups_to_keep` in `config.toml` - only when you did not
   set those keys yourself;
 - with `backup.scheduled: true` additionally: `admin_signal_execute: ["server backup-database"]`, a
-  `backup` sidecar (`busybox`, running `crond -f -l 8 -c /etc/crontabs`), a
+  `backup` sidecar (`busybox`, running `crond -f -l 8 -c /etc/crontabs` as root - see below), a
   `<fullname>-backup-crontabs` ConfigMap whose only entry is
   `<schedule> pkill -USR2 -x tuwunel`, and `shareProcessNamespace: true` so that signal reaches the
   server process. SIGUSR2 makes the server run the configured admin command, i.e. the same online
@@ -353,10 +371,25 @@ What `backup.enabled: true` renders:
 | `backup.size`                | Backup PVC size                                                      | `5Gi`                  |
 | `backup.path`                | Mount path and `database_backup_path`; keep it off the data volume    | `/backups`             |
 | `backup.keep`                | `database_backups_to_keep`; older backups are pruned after a new one  | `7`                    |
-| `backup.scheduled`           | Add the SIGUSR2 cron sidecar and its crontab ConfigMap               | `false`                |
+| `backup.scheduled`           | Add the SIGUSR2 cron sidecar and crontab ConfigMap; needs `enabled`   | `false`                |
 | `backup.schedule`            | Five-field cron expression for the sidecar                           | `0 3 * * *`            |
 | `backup.command`             | The admin command a SIGUSR2 runs (`admin_signal_execute`)            | `server backup-database` |
 | `backup.sidecar.resources`   | Resources for the cron sidecar                                       | 10m/32Mi requests, 100m/64Mi limits |
+
+`backup.scheduled: true` requires `backup.enabled: true`. The cron sidecar mounts the crontab
+ConfigMap, and that ConfigMap is rendered only when both are set, so the combination is refused at
+render time instead of producing a pod that cannot start.
+
+The sidecar runs as root with the `SETGID`, `SETUID` and `KILL` capabilities added, and nothing
+else relaxed: it keeps the read-only root filesystem, no privilege escalation, every other
+capability dropped and the same resource limits. busybox `crond` runs a spool file as the user that
+file is named after, and the chart names it `root`, so a container started as the pod's
+unprivileged user cannot switch identity and silently skips the job; the added capabilities are
+what let the job signal a server running as a different uid. The job fires on its schedule, and the
+evidence is on the server side: its `Created database backup` log line and the entries under
+`<backup.path>/meta/`. `crond` logs through syslog, which nothing in the pod collects, so
+`kubectl logs <pod> -c backup` looks the same whether or not the job ran - an empty sidecar log is
+not a missing backup.
 
 Keep `backup.path` outside the data volume - a backup that shares a volume with the database does
 not survive losing it.
