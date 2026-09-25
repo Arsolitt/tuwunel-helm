@@ -1,33 +1,42 @@
 #!/usr/bin/env bash
 #
-# Print the GitHub release body for one chart version: the `## [<version>]`
+# Print the GitHub release body for one release: the `## [<section version>]`
 # section of CHANGELOG.md, plus a compare link when the tags can be resolved.
 #
-# The `release` job in .github/workflows/ci.yaml runs this once per chart that
-# chart-releaser has just published, and pipes the output into `gh release edit
-# <tag> --notes-file`. chart-releaser-action@v1.7.0 carries no release notes at
-# all - `cr upload` reads a notes file only from inside the packaged chart, and
-# the action does not pass that flag - so without this step every release body
-# would stay the chart `description` from Chart.yaml, a sentence that says
-# nothing about what changed in that version.
+# The `release` job in .github/workflows/ci.yaml runs this once per tag it has
+# just published (`hack/release-notes.sh <version> <section version>`) and pipes
+# the output into `gh release edit <tag> --notes-file`; `hack/release.sh` runs it
+# in `--check` mode, before a tag exists, because a missing section has to fail
+# there rather than in the release job after the gates.
+#
+# The version and the section are two arguments because the two tracks read
+# CHANGELOG.md differently: a stable release `2.1.0` publishes `## [2.1.0]`,
+# while a candidate `2.1.0-rc.1` publishes the section of the version it is a
+# candidate of, `## [2.1.0]` - the section is written once per version and the
+# candidates of it share it.
 #
 # The section *is* the release body, which is what keeps the notes in the
 # repository and the notes on the GitHub release from drifting apart: editing
 # CHANGELOG.md is how release notes are written, nothing is generated from
 # commit messages.
 #
-#   1. locate the section for <version> - from the `## [<version>]` heading up
-#      to (excluding) the next `## ` heading, with leading and trailing blank
-#      lines trimmed. A version whose heading is absent exits non-zero and
-#      prints nothing: the release job must go red, not publish a release whose
-#      body silently stayed the chart description;
+#   1. locate the section for <section version> - from the `## [<version>]`
+#      heading up to (excluding) the next `## ` heading, with leading and
+#      trailing blank lines trimmed. A version whose heading is absent exits
+#      non-zero and prints nothing: the release job must go red, not publish a
+#      release whose body silently stayed the chart description;
 #   2. print the section;
 #   3. append the `**Full Changelog**: <compare URL>` line when the repository,
-#      the `<chart name>-<version>` tag and the previous `<chart name>-*` tag
-#      are all resolvable. That part is best effort: any of them missing just
-#      means the section is printed alone, still with exit 0.
+#      the `<chart name>-<version>` tag and a previous `<chart name>-*` tag are
+#      all resolvable. The previous tag follows the release's own track - a
+#      candidate compares against the tag that preceded it, a stable release
+#      against the previous stable one, so its compare range is the whole line
+#      and not just what changed since the last candidate. That part is best
+#      effort: any of them missing just means the section is printed alone,
+#      still with exit 0.
 #
-# usage: hack/release-notes.sh <version>       (the bare Chart.yaml version, e.g. 2.0.0)
+# usage: hack/release-notes.sh <version> [<section-version>]   (e.g. 2.0.0, or
+#                                              2.1.0-rc.1 2.1.0 for a candidate)
 #        CHANGELOG_FILE=<path>                 (default: CHANGELOG.md at the repo root,
 #                                               resolved from this script's own location
 #                                               rather than from $PWD; set for tests)
@@ -44,11 +53,12 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(dirname -- "$script_dir")"
 
-if [ "$#" -ne 1 ] || [ -z "$1" ]; then
-  echo "usage: hack/release-notes.sh <version>   (e.g. 2.0.0)" >&2
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ] || [ -z "$1" ]; then
+  echo "usage: hack/release-notes.sh <version> [<section-version>]   (e.g. 2.0.0, or 2.1.0-rc.1 2.1.0 for a candidate)" >&2
   exit 2
 fi
 version="$1"
+section_version="${2:-$1}"
 
 changelog="${CHANGELOG_FILE:-$repo_root/CHANGELOG.md}"
 if [ ! -f "$changelog" ]; then
@@ -61,7 +71,7 @@ fi
 # to be a space (the ` - <date>` separator) or the end of the line, so looking
 # for `1.2.0` does not pick up a `1.2.0-rc1` heading above it.
 section="$(
-  awk -v version="$version" '
+  awk -v version="$section_version" '
     BEGIN { prefix = "## [" version "]" }
     !in_section {
       if (index($0, prefix) == 1 && (length($0) == length(prefix) || substr($0, length(prefix) + 1, 1) == " ")) {
@@ -81,7 +91,7 @@ section="$(
     }
   ' "$changelog"
 )" || {
-  echo "no '## [${version}]' section in ${changelog}: add it before releasing ${version}, the GitHub release body is taken from it" >&2
+  echo "no '## [${section_version}]' section in ${changelog}: add it before releasing ${version}, the GitHub release body is taken from it" >&2
   exit 1
 }
 
@@ -109,8 +119,8 @@ if [ -z "$repo" ]; then
 fi
 repo="${repo%.git}"
 
-# The tag chart-releaser created, from the chart's own name: `name` and
-# `version` in Chart.yaml are what the tag was built out of.
+# The tag, from the chart's own name: a release tag is `<chart name>-<version>`,
+# the same string `hack/release.sh` pushes and the release job attaches to.
 chart_yaml="$repo_root/charts/tuwunel/Chart.yaml"
 chart_name=""
 if [ -f "$chart_yaml" ]; then
@@ -123,20 +133,29 @@ if [ -n "$chart_name" ]; then
 fi
 
 # The previous release tag: the entry right after the released one in the
-# version-sorted list, so the compare range is the step that release made. While
-# the new tag does not exist in the checkout yet (the script run by hand before
-# chart-releaser creates it, or a backfill of an older version), the newest tag
-# is the right answer, because a release is always the newest version. Tags
-# present in the checkout are enough - the release job checks out with
-# fetch-depth: 0 and chart-releaser runs `git fetch --tags`.
+# version-sorted list, so the compare range is the step that release made. A
+# candidate compares against whatever preceded it, a stable release against the
+# previous *stable* one - its body is the whole section, not just what changed
+# since the last candidate. When the released tag is not in the list yet (the
+# script run by hand before the tag exists) it is the newest version by
+# definition and stands in for itself, so the first entry below it is still the
+# previous release.
+skip_prereleases=1
+case "$version" in
+  *-*) skip_prereleases=0 ;;
+esac
 previous=""
 if [ -n "$repo" ] && [ -n "$tag" ]; then
   if tags="$(git -C "$repo_root" tag --list "${chart_name}-*" --sort=-v:refname 2>/dev/null)" && [ -n "$tags" ]; then
-    if grep -qxF -- "$tag" <<<"$tags"; then
-      previous="$(awk -v tag="$tag" 'found { print; exit } $0 == tag { found = 1 }' <<<"$tags")"
-    else
-      previous="$(awk 'NR == 1 { print; exit }' <<<"$tags")"
+    if ! grep -qxF -- "$tag" <<<"$tags"; then
+      tags="${tag}"$'\n'"${tags}"
     fi
+    previous="$(awk -v tag="$tag" -v prefix="${chart_name}-" -v skip_pre="$skip_prereleases" '
+      $0 == tag { found = 1; next }
+      !found { next }
+      skip_pre == 1 { candidate = $0; sub("^" prefix, "", candidate); if (candidate ~ /-/) next }
+      { print; exit }
+    ' <<<"$tags")"
   fi
 fi
 
