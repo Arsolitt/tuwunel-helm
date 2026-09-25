@@ -522,6 +522,11 @@ jobs:
             args+=(--make-release-latest=false)
           fi
           cr upload "${args[@]}"
+          # `cr index` keeps its local copy of the index at
+          # `.cr-index/index.yaml` and writes it with no parent-directory
+          # creation (the action's own script makes the directory first), so a
+          # missing `.cr-index` fails the step after the release was uploaded.
+          mkdir -p .cr-index
           cr index -o "$owner" -r "$repo" --push
 
       # The body is the repository's own text: the `## [<version>]` section of
