@@ -14,6 +14,6 @@ spec:
       targetPort: http
       protocol: TCP
   selector:
-    {{- include "tuwunel.labels" . | nindent 4 }}
+    {{- include "tuwunel.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: rtc-jwt
 {{- end }}

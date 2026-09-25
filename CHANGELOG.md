@@ -7,6 +7,46 @@ version is published as that GitHub release's body by the `release` job in
 Versions follow `Chart.yaml`; the matching git tag is `tuwunel-<version>`.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.0.2] - 2026-09-25
+
+### Fixed
+
+- **A chart upgrade no longer fails on an immutable selector.** `spec.selector.matchLabels` of the
+  StatefulSet and of the two RTC Deployments was rendered from the whole label set, which carries
+  `helm.sh/chart: tuwunel-<chart version>`. That value moves with every chart release and a workload's
+  selector is immutable, so the first upgrade of any release created by 2.0.1 or older was refused by
+  the API server with `spec.selector: Invalid value: …: field is immutable` - naming the three objects
+  and no cause. Every selector, Services included, now renders from a subset that cannot move:
+  `app.kubernetes.io/name`, `app.kubernetes.io/instance` and the resource's component.
+- **The render refuses that upgrade itself, with the commands that fix it.** The statefulset template
+  reads the live StatefulSet and the two RTC Deployments through `lookup`; when one of them still
+  carries `helm.sh/chart` in its selector, the render fails before anything is applied and prints the
+  ready `kubectl delete` commands for the release at hand (`--cascade=orphan` for the StatefulSet, a
+  plain delete for the RTC Deployments). Measured on Kubernetes 1.35: the homeserver pod is not
+  restarted - the recreated StatefulSet adopts it, same pod UID, `restartCount` unchanged, the
+  database on its PersistentVolumeClaim untouched - and the two RTC Deployments recreate their pods.
+  `lookup` has nothing to ask without a cluster, so `helm template` and `helm lint` (`lint`, CI) never
+  see the check, and it goes silent for good once the commands have run.
+- **A Service no longer drops its endpoints during a chart upgrade.** The three Services selected on
+  the same moving label set, `helm.sh/chart` included, and the new selector is applied before any new
+  pod exists - so from the first apply until the first new pod was Ready the Service matched no pod.
+  The stable subset matches the pods that are still running, so the endpoints never empty.
+
+### Changed
+
+- **`lint` asserts both selector properties on every render** - the defaults and each
+  `ci/*-values.yaml` fixture: no selector carries a label that moves with the chart version
+  (`helm.sh/chart`, `app.kubernetes.io/version`, `app.kubernetes.io/managed-by`), and every
+  workload's own pod template carries everything its selector asks for. Chart 2.0.1 fails the first
+  assertion, so a single render can no longer ship a defect only the next chart release discovers.
+- Docs: [Upgrading](./docs/upgrade.md) gains the one-time migration with the measured effect of each
+  command, [Troubleshooting](./docs/troubleshooting.md) gains the raw API error and the new guard,
+  [How the chart renders a running server](./docs/internals.md) explains why the selectors are a fixed
+  subset, [Installing the chart](./docs/installation.md) documents the label split, and
+  [Configuring the server](./docs/configuration.md) records that upstream documents
+  `[global.blurhashing]` without implementing it - no released image registers the section (nor the
+  shorter `blurhash`), so neither spelling can turn blurhashes on.
+
 ## [2.0.1] - 2026-09-24
 
 ### Fixed

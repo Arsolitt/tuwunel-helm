@@ -1,3 +1,7 @@
+{{/* The only template that renders in every release, so the upgrade guard lives
+     here; see tuwunel.assert-selector-migration in _helpers.tpl. */}}
+{{- include "tuwunel.assert-selector-migration" . }}
+
 {{- $threads := 1 }}
 {{- if .Values.resources.limits.cpu }}
   {{- if typeIs "string" .Values.resources.limits.cpu }}
@@ -54,7 +58,7 @@ spec:
   podManagementPolicy: Parallel
   selector:
     matchLabels:
-      {{- include "tuwunel.labels" . | nindent 6 }}
+      {{- include "tuwunel.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: tuwunel
   template:
     metadata:

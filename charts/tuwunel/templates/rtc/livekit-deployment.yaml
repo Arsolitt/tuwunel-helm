@@ -15,7 +15,7 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      {{- include "tuwunel.labels" . | nindent 6 }}
+      {{- include "tuwunel.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: rtc-livekit
   template:
     metadata:

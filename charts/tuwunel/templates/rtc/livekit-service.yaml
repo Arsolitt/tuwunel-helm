@@ -72,6 +72,6 @@ spec:
       protocol: UDP
     {{- end }}
   selector:
-    {{- include "tuwunel.labels" $ | nindent 4 }}
+    {{- include "tuwunel.selectorLabels" $ | nindent 4 }}
     app.kubernetes.io/component: rtc-livekit
 {{- end }}

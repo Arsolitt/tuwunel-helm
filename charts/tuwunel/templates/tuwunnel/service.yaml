@@ -40,7 +40,7 @@ spec:
       port: {{ .Values.service.port }}
       targetPort: http
   selector:
-    {{- include "tuwunel.labels" . | nindent 4 }}
+    {{- include "tuwunel.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: tuwunel
   type: {{ .Values.service.type }}
 
