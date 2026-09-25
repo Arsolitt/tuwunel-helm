@@ -16,8 +16,9 @@
 # section of CHANGELOG.md - write the section for the version you will ship,
 # then cut candidates of it.
 #
-# <version> may carry the chart's tag prefix (`tuwunel-2.1.0-rc.1`); the release
-# job passes `$GITHUB_REF_NAME` straight through.
+# The tag is `release-<version>`; `<version>` may be given with or without the
+# prefix (`release-2.1.0-rc.1`), because the release job passes
+# `$GITHUB_REF_NAME` straight through.
 #
 # --check prints, on stdout and only on success, the four facts the release job
 # turns into step outputs (`key=value` lines, appended to `$GITHUB_OUTPUT`):
@@ -25,7 +26,7 @@
 #   version=2.1.0-rc.1
 #   channel=rc
 #   section=2.1.0
-#   tag=tuwunel-2.1.0-rc.1
+#   tag=release-2.1.0-rc.1
 #
 # Checks, in order - each one exits before anything is created:
 #   1. the version has one of the two shapes above;
@@ -44,7 +45,11 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(dirname -- "$script_dir")"
-chart_dir="$repo_root/charts/tuwunel"
+
+# The tag prefix - `release-<version>`. It has to match the `on.push.tags`
+# filter in .github/workflows/ci.yaml, which is what turns a pushed tag into a
+# release at all.
+tag_prefix="release-"
 
 check=false
 if [ "${1:-}" = "--check" ]; then
@@ -53,20 +58,13 @@ if [ "${1:-}" = "--check" ]; then
 fi
 
 if [ "$#" -ne 1 ] || [ -z "${1:-}" ]; then
-  echo "usage: hack/release.sh [--check] <version>   (e.g. 2.1.0, 2.1.0-rc.1 or tuwunel-2.1.0-rc.1)" >&2
+  echo "usage: hack/release.sh [--check] <version>   (e.g. 2.1.0, 2.1.0-rc.1 or release-2.1.0-rc.1)" >&2
   exit 2
 fi
-
-chart_yaml="$chart_dir/Chart.yaml"
-if [ ! -f "$chart_yaml" ]; then
-  echo "no chart metadata at ${chart_yaml}: the chart name and the tag prefix come from it" >&2
-  exit 2
-fi
-chart_name="$(awk '/^name:/ { print $2; exit }' "$chart_yaml")"
 
 arg="$1"
 case "$arg" in
-  "${chart_name}-"*) version="${arg#"${chart_name}-"}" ;;
+  "${tag_prefix}"*) version="${arg#"${tag_prefix}"}" ;;
   *) version="$arg" ;;
 esac
 
@@ -81,7 +79,7 @@ else
   exit 2
 fi
 
-tag="${chart_name}-${version}"
+tag="${tag_prefix}${version}"
 
 # The section is the release body: a missing one has to fail here, before a tag
 # exists, not in the release job after the gates.

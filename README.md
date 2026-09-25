@@ -167,8 +167,8 @@ exists only because a tag was pushed. Both tracks are cut from `main` and the ta
 
 | Track | Tag | GitHub release |
 | --- | --- | --- |
-| stable | `tuwunel-2.1.0` | normal, takes "Latest" |
-| release candidate | `tuwunel-2.1.0-rc.1` | pre-release, never "Latest" |
+| stable | `release-2.1.0` | normal, takes "Latest" |
+| release candidate | `release-2.1.0-rc.1` | pre-release, never "Latest" |
 
 1. Write the section the release body comes from: `## [<version>]` in
    [`CHANGELOG.md`](./CHANGELOG.md). A candidate reuses the section of the version it is a candidate

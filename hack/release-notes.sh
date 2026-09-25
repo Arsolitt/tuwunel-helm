@@ -27,11 +27,13 @@
 #      release whose body silently stayed the chart description;
 #   2. print the section;
 #   3. append the `**Full Changelog**: <compare URL>` line when the repository,
-#      the `<chart name>-<version>` tag and a previous `<chart name>-*` tag are
-#      all resolvable. The previous tag follows the release's own track - a
+#      the `release-<version>` tag and a previous `release-*` tag are all
+#      resolvable. The previous tag follows the release's own track - a
 #      candidate compares against the tag that preceded it, a stable release
 #      against the previous stable one, so its compare range is the whole line
-#      and not just what changed since the last candidate. That part is best
+#      and not just what changed since the last candidate. The tags of the prefix
+#      used before `release-` are releases of this chart too, so the first tag of
+#      the new prefix compares against the newest of them. That part is best
 #      effort: any of them missing just means the section is printed alone,
 #      still with exit 0.
 #
@@ -41,8 +43,8 @@
 #                                               resolved from this script's own location
 #                                               rather than from $PWD; set for tests)
 #
-# The chart name in the tag and in the tag list comes from
-# charts/tuwunel/Chart.yaml, the repository's only chart.
+# The tag prefix is a constant in this script and in `hack/release.sh`, and the
+# same string is the `on.push.tags` filter in .github/workflows/ci.yaml.
 #
 # Needs bash and awk. Exits 0 with the body on stdout; 1 with a message on
 # stderr and nothing on stdout when the section is missing; 2 on a usage error.
@@ -52,6 +54,15 @@ set -euo pipefail
 # the checkout root, but a manual run should not depend on the caller's cwd.
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(dirname -- "$script_dir")"
+
+# The tag prefix - `release-<version>`. `hack/release.sh` pushes the same string,
+# and the `on.push.tags` filter in .github/workflows/ci.yaml is what turns a
+# pushed tag into a release at all.
+tag_prefix="release-"
+# The prefix the release tags used before this one. Those tags are releases of
+# this chart as well, so they are the previous release for the first tag of the
+# new prefix - the only thing this constant is used for.
+legacy_tag_prefix="tuwunel-"
 
 if [ "$#" -lt 1 ] || [ "$#" -gt 2 ] || [ -z "$1" ]; then
   echo "usage: hack/release-notes.sh <version> [<section-version>]   (e.g. 2.0.0, or 2.1.0-rc.1 2.1.0 for a candidate)" >&2
@@ -100,8 +111,8 @@ if [ -n "$section" ]; then
 fi
 
 # Everything below is the compare link, which is a nicety and never a reason to
-# fail: a missing remote, a checkout without tags or a chart name that cannot be
-# read each leave the body as the section alone.
+# fail: a missing remote or a checkout without tags leaves the body as the
+# section alone.
 
 # `owner/repo`, from the workflow's environment or from the checkout's origin.
 # Both the scp-like and the URL forms of a GitHub remote are accepted.
@@ -119,18 +130,9 @@ if [ -z "$repo" ]; then
 fi
 repo="${repo%.git}"
 
-# The tag, from the chart's own name: a release tag is `<chart name>-<version>`,
-# the same string `hack/release.sh` pushes and the release job attaches to.
-chart_yaml="$repo_root/charts/tuwunel/Chart.yaml"
-chart_name=""
-if [ -f "$chart_yaml" ]; then
-  chart_name="$(awk '/^name:/ { print $2; exit }' "$chart_yaml")"
-fi
-
-tag=""
-if [ -n "$chart_name" ]; then
-  tag="${chart_name}-${version}"
-fi
+# The tag, the same string `hack/release.sh` pushes and the release job attaches
+# to.
+tag="${tag_prefix}${version}"
 
 # The previous release tag: the entry right after the released one in the
 # version-sorted list, so the compare range is the step that release made. A
@@ -146,16 +148,23 @@ case "$version" in
 esac
 previous=""
 if [ -n "$repo" ] && [ -n "$tag" ]; then
-  if tags="$(git -C "$repo_root" tag --list "${chart_name}-*" --sort=-v:refname 2>/dev/null)" && [ -n "$tags" ]; then
+  if tags="$(git -C "$repo_root" tag --list "${tag_prefix}*" --sort=-v:refname 2>/dev/null)" && [ -n "$tags" ]; then
     if ! grep -qxF -- "$tag" <<<"$tags"; then
       tags="${tag}"$'\n'"${tags}"
     fi
-    previous="$(awk -v tag="$tag" -v prefix="${chart_name}-" -v skip_pre="$skip_prereleases" '
+    previous="$(awk -v tag="$tag" -v prefix="${tag_prefix}" -v skip_pre="$skip_prereleases" '
       $0 == tag { found = 1; next }
       !found { next }
       skip_pre == 1 { candidate = $0; sub("^" prefix, "", candidate); if (candidate ~ /-/) next }
       { print; exit }
     ' <<<"$tags")"
+  fi
+  # The first release under this prefix has no predecessor wearing it: the newest
+  # tag of the prefix used before is the previous release. No pipe here - `head`
+  # would end the pipeline early and `pipefail` would turn that into a failure.
+  if [ -z "$previous" ]; then
+    legacy_tags="$(git -C "$repo_root" tag --list "${legacy_tag_prefix}*" --sort=-v:refname 2>/dev/null || true)"
+    previous="${legacy_tags%%$'\n'*}"
   fi
 fi
 

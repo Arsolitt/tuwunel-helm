@@ -19,7 +19,7 @@
 # Those three run on pull requests, on pushes to main and on release tags: a tag
 # is released by the same gates the branch is held to.
 #
-#   release-tag  runs on a `tuwunel-*` tag: the version is either
+#   release-tag  runs on a `release-*` tag: the version is either
 #                `<major>.<minor>.<patch>` (the stable track) or
 #                `<major>.<minor>.<patch>-rc.<n>` (the release candidate track),
 #                the CHANGELOG.md section the release body comes from has to
@@ -43,7 +43,7 @@ on:
     branches:
       - main
     tags:
-      - 'tuwunel-*'
+      - 'release-*'
 
 permissions:
   contents: read

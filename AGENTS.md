@@ -71,14 +71,14 @@ helm package charts/tuwunel
   TOML type (`allow_federation = "false"` makes tuwunel exit 1 at startup) or a readiness path
   that answers 403 in the default federation-disabled configuration; the other jobs check
   manifest shape only and never read the rendered config file.
-- `release-tag` - a `push` of a `tuwunel-*` tag only, and it runs before the gates. It resolves the
+- `release-tag` - a `push` of a `release-*` tag only, and it runs before the gates. It resolves the
   release with `hack/release.sh --check "$GITHUB_REF_NAME"` - the same script that cuts the tag, so
   the shape rules cannot drift - and refuses a tag that is not an ancestor of `origin/main`. A
   version is either `<major>.<minor>.<patch>` (stable) or `<major>.<minor>.<patch>-rc.<n>` (release
   candidate); anything else, and a missing `## [<version>]` CHANGELOG section, fails here in seconds
   instead of after the ~25-minute `runtime` gate. It publishes `version`, `channel`, `section` and
   `tag` as job outputs.
-- `release` - a `push` of a `tuwunel-*` tag only, `needs: [release-tag, lint, schema, runtime]`,
+- `release` - a `push` of a `release-*` tag only, `needs: [release-tag, lint, schema, runtime]`,
   `concurrency: chart-release`. It packages the tagged tree itself with `helm package --version`
   (the tag carries the version; the tree still records the previous release), reads the package back
   to prove its `Chart.yaml` carries that version, then creates the GitHub release with
@@ -105,8 +105,8 @@ Rules that keep this honest:
   A fixture in the wrong folder makes the job that owns it fail, not pass.
 - The chart defaults are a supported configuration, so `lint` renders and validates them next to
   the fixtures - the release job packages the tagged tree as-is, so the defaults are what users get.
-- A release is a pushed tag of one of two shapes - `tuwunel-<major>.<minor>.<patch>` (stable) or
-  `tuwunel-<major>.<minor>.<patch>-rc.<n>` (release candidate) - and `hack/release.sh <version>` is
+- A release is a pushed tag of one of two shapes - `release-<major>.<minor>.<patch>` (stable) or
+  `release-<major>.<minor>.<patch>-rc.<n>` (release candidate) - and `hack/release.sh <version>` is
   the only thing that creates one. Nothing in the tree is bumped to publish: the version is stamped
   into the package with `helm package --version` and recorded on `main` afterwards in a
   `chore(release): record <tag> [skip ci]` commit.

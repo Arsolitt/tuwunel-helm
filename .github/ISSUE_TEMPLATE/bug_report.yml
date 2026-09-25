@@ -25,7 +25,7 @@ body:
     attributes:
       label: Chart version
       description: From `helm list -n <namespace>` (CHART column) or the release tag.
-      placeholder: tuwunel-1.0.3
+      placeholder: release-2.0.2
     validations:
       required: true
 

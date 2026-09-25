@@ -22,7 +22,7 @@
 
 | Field | Value in chart 2.0.2 | What it decides |
 | --- | --- | --- |
-| `version` | `2.0.2` | The chart release. The git tag and the published index entry are `tuwunel-2.0.2`. |
+| `version` | `2.0.2` | The chart release. Every release carries a `release-<version>` tag and the published index entry points at it; the releases up to 2.0.2 keep the `tuwunel-<version>` tag the tooling of the time created. |
 | `appVersion` | `v1.9.2` | Metadata only: the tuwunel release the defaults target. The image the pod runs comes from `image.tag` (default `v1.9.2`) — no template reads `appVersion`. |
 | `kubeVersion` | `>=1.31.0-0` | Enforced by Helm before anything is rendered. A cluster below 1.31 cannot take the chart at all. `kubeVersion` was introduced by 2.0.0. |
 
@@ -371,7 +371,7 @@ forward operation driven through the release's `args`
 
 ## Changes that publish nothing
 
-Only a pushed tag publishes. The release jobs run on a `tuwunel-*` tag and nowhere else (`release-tag`
+Only a pushed tag publishes. The release jobs run on a `release-*` tag and nowhere else (`release-tag`
 resolves it, `lint`, `schema` and `runtime` gate it, then `release` publishes), so a merge publishes
 nothing - documentation, CI, and even a chart change - until a tag is cut with
 `hack/release.sh <version>`. There is no unreleased version for the pipeline to find and no `version`
