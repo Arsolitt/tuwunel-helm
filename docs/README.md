@@ -19,7 +19,7 @@
 | [Day-2 operations](./operations.md) | What a running tuwunel release looks like from the outside: probe behaviour, the migration budget, what a values edit restarts, storage growth and the routine checks. |
 | [Troubleshooting](./troubleshooting.md) | Symptom catalogue for the tuwunel chart: the exact error text it produces, what each one means, and the page that owns the fix. |
 | [How the chart renders a running server](./internals.md) | What happens between your values and a running tuwunel process: the ConfigMap template, the envsubst init container, the chart-owned environment, and every guard that stops a bad render. |
-| [Development and releases](./development.md) | Repository layout, the fixture contract, the local command set and the CI jobs behind this chart, and how a `Chart.yaml` bump becomes a published release. |
+| [Development and releases](./development.md) | Repository layout, the fixture contract, the local command set and the CI jobs behind this chart, and how a release tag becomes a published release. |
 
 ## Where to go for what
 

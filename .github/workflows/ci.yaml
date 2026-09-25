@@ -1,22 +1,38 @@
-# Single pipeline for the chart: quality gate on pull requests, release on main.
+# Single pipeline for the chart: quality gate on every change, release on a tag.
 #
-# Job ids are the status-check contexts (`lint`, `schema`, `runtime`, `release`);
-# the first three are meant to be required on pull requests. There is
-# deliberately no `paths:` filter on `pull_request` - a job skipped by a path
-# filter never reports a status, so requiring it would block every merge that
-# does not touch those paths.
+# Job ids are the status-check contexts (`lint`, `schema`, `runtime`,
+# `release-tag`, `release`); the first three are meant to be required on pull
+# requests. There is deliberately no `paths:` filter on `pull_request` - a job
+# skipped by a path filter never reports a status, so requiring it would block
+# every merge that does not touch those paths.
 #
-#   lint     renders the chart defaults and every ci/*-values.yaml fixture and
-#            validates each render against the Kubernetes schemas, plus the
-#            Gateway API kinds the chart can render (kubeconform ships none of
-#            that group's schemas; they come from a pinned catalog commit).
-#   schema   proves ci/invalid/*.yaml is refused by values.schema.json and
-#            ci/invalid-render/*.yaml is refused by the template that owns the
-#            cross-value rule, so neither guardrail can be dropped silently.
-#   runtime  starts the real image on every fixture (see hack/runtime-check.sh).
-#   release  runs on main: chart-releaser publishes any chart version that is not
-#            released yet, then the released version's CHANGELOG.md section
-#            becomes the GitHub release body.
+#   lint         renders the chart defaults and every ci/*-values.yaml fixture and
+#                validates each render against the Kubernetes schemas, plus the
+#                Gateway API kinds the chart can render (kubeconform ships none
+#                of that group's schemas; they come from a pinned catalog commit).
+#   schema       proves ci/invalid/*.yaml is refused by values.schema.json and
+#                ci/invalid-render/*.yaml is refused by the template that owns
+#                the cross-value rule, so neither guardrail can be dropped
+#                silently.
+#   runtime      starts the real image on every fixture (see hack/runtime-check.sh).
+#
+# Those three run on pull requests, on pushes to main and on release tags: a tag
+# is released by the same gates the branch is held to.
+#
+#   release-tag  runs on a `tuwunel-*` tag: the version is either
+#                `<major>.<minor>.<patch>` (the stable track) or
+#                `<major>.<minor>.<patch>-rc.<n>` (the release candidate track),
+#                the CHANGELOG.md section the release body comes from has to
+#                exist, and the tagged commit has to be on main. It fails in
+#                seconds, before the ~25-minute runtime gate starts.
+#   release      runs on a tag, after those gates: the chart is packaged with the
+#                tag's version stamped into it (`helm package --version`), the
+#                release and the gh-pages index entry are published under the
+#                tag that already exists, the GitHub release body becomes the
+#                tag version's `## [<version>]` CHANGELOG.md section (a
+#                candidate uses the section of the version it is a candidate of
+#                and is flagged pre-release), and main then records the version
+#                in Chart.yaml.
 #
 # Tool pins live in `env:` below; Dependabot keeps the actions themselves fresh.
 name: CI
@@ -26,6 +42,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'tuwunel-*'
 
 permissions:
   contents: read
@@ -143,8 +161,9 @@ jobs:
             done
           }
           # The defaults are a supported install too, and they are what most
-          # users get: chart-releaser publishes this chart as-is, so validating
-          # only the fixtures would leave the published configuration unchecked.
+          # users get: the release job packages the tagged tree as-is, so
+          # validating only the fixtures would leave the published
+          # configuration unchecked.
           validate "default values"
           for values in "$CHART_DIR"/ci/*-values.yaml; do
             validate "$(basename "$values")" -f "$values"
@@ -382,88 +401,208 @@ jobs:
       - name: Start the image and probe it the way the manifests say
         run: hack/runtime-check.sh "$CHART_DIR"
 
-  release:
-    name: Release chart
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [lint, schema, runtime]
+  # The tag is a release request: its shape, the CHANGELOG section the release
+  # body comes from, and the branch it was cut from are checked here, before the
+  # expensive gates start.
+  release-tag:
+    name: Resolve the release tag
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      channel: ${{ steps.resolve.outputs.channel }}
+      section: ${{ steps.resolve.outputs.section }}
+      tag: ${{ steps.resolve.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
+      - name: Resolve the release from the tag
+        id: resolve
+        run: |
+          set -euo pipefail
+          # The two version shapes, the track classification and the CHANGELOG
+          # section live in hack/release.sh - the same script the maintainer runs
+          # to cut the tag, so the two cannot drift.
+          hack/release.sh --check "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+
+          # Releases are cut from main: a tag on a commit main does not serve
+          # would publish a chart nobody can reach from the branch, and the
+          # version would be recorded on a history that never had it.
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::${GITHUB_REF_NAME} is not on main - releases are cut from main"
+            exit 1
+          fi
+
+  release:
+    name: Release chart
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: [release-tag, lint, schema, runtime]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # One release at a time: two tags pushed close together would otherwise race
+    # on the same branch, and the loser fails on a non-fast-forward push after
+    # its release already exists.
+    concurrency: chart-release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+
       - name: Configure Git
         run: |
           git config user.name "$GITHUB_ACTOR"
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
-      # Packages every chart whose version is not released yet, creates the
-      # `<chart>-<version>` tag and GitHub release, and updates the index.yaml
-      # published by the gh-pages branch. A chart version that is already
-      # released is skipped, so doc-only merges are a no-op. The releases it
-      # creates carry the chart `description` as their body; the next step
-      # replaces that with the chart's CHANGELOG.md section.
-      - name: Run chart-releaser
-        id: release
+      # The tag carries the version, and the tagged tree still records the
+      # *previous* release (the bump commit lands on main only after this job),
+      # so the package is stamped from the tag. The artifact is then read back:
+      # a package whose Chart.yaml does not carry the released version would
+      # publish under a tag the index points at.
+      - name: Package the chart at the released version
+        env:
+          VERSION: ${{ needs.release-tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          rm -rf .cr-release-packages
+          mkdir -p .cr-release-packages
+          helm package "$CHART_DIR" --version "$VERSION" --destination .cr-release-packages
+          chart_name=$(awk '/^name:/ { print $2; exit }' "$CHART_DIR/Chart.yaml")
+          package=".cr-release-packages/${chart_name}-${VERSION}.tgz"
+          if [ ! -f "$package" ]; then
+            echo "::error::helm package produced no ${package}"
+            exit 1
+          fi
+          if ! tar -xzOf "$package" "${chart_name}/Chart.yaml" | grep -qE "^version: \"?${VERSION}\"?$"; then
+            echo "::error::the packaged chart does not carry the released version ${VERSION}"
+            exit 1
+          fi
+          echo "::notice::packaged $(basename "$package") from the tag"
+
+      # The action installs the pinned `cr` binary only: its own release path
+      # cannot be used here. It packages "charts changed since the previous
+      # tag", which is not the contract, and with packaging skipped its script
+      # dies on an unbound variable (`cr.sh` writes `chart_version=${latest_tag}`
+      # outside the branch that sets it, under `set -o nounset`) after the
+      # upload has already succeeded - fixed on the action's `main`, unreleased
+      # as of v1.7.0. `cr index` is what is needed from the binary.
+      - name: Install chart-releaser
         uses: helm/chart-releaser-action@v1.7.0
         with:
           version: ${{ env.CHART_RELEASER_VERSION }}
-          skip_existing: true
-        env:
-          CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          install_only: true
 
-      # The release body has to come from the repository, and chart-releaser
-      # cannot carry it: chart-releaser-action@v1.7.0 has no notes input, and
-      # `cr upload` reads `--release-notes-file` only from inside the packaged
-      # chart. So the body is edited in after the release exists, from
-      # CHANGELOG.md - the `## [<version>]` section of the version that was just
-      # released, plus a compare link. A released version without that section
-      # fails this step, and the job, rather than publishing a release whose
-      # body silently stayed the chart description.
-      - name: Publish release notes
-        if: steps.release.outputs.changed_charts != ''
+      # The release is created here rather than by `cr upload`, because `cr`
+      # cannot create a pre-release (chart-releaser v1.8.1 has no such flag) and
+      # a candidate that exists unflagged - even for the seconds between two
+      # steps - is a release consumers see as stable, which is exactly what a
+      # run that died after the upload used to leave behind. The flag and the
+      # body are part of the create call, and a re-run after a failed step finds
+      # the release and updates it instead, so the step is idempotent.
+      - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CHANGED_CHARTS: ${{ steps.release.outputs.changed_charts }}
+          TAG: ${{ needs.release-tag.outputs.tag }}
+          VERSION: ${{ needs.release-tag.outputs.version }}
+          SECTION: ${{ needs.release-tag.outputs.section }}
+          CHANNEL: ${{ needs.release-tag.outputs.channel }}
         run: |
           set -euo pipefail
           notes=$(mktemp)
           trap 'rm -f "$notes"' EXIT
-          # `changed_charts` is a comma-separated list of chart directories
-          # (cr.sh writes it with IFS=,), and an empty string when no version
-          # changed - which is what the `if:` above filters out, repeated here so
-          # the block is a no-op when run by hand too (and because `"${charts[@]}"`
-          # on an empty array trips `set -u` before bash 4.4). The action's other
-          # output is not usable here: `chart_version` is the *previous* tag
-          # (`git describe --tags --abbrev=0 HEAD~`), so the released version is
-          # read back from each chart's Chart.yaml.
-          if [ -n "$CHANGED_CHARTS" ]; then
-            IFS=',' read -ra charts <<<"$CHANGED_CHARTS"
-            for chart_dir in "${charts[@]}"; do
-              [ -n "$chart_dir" ] || continue
-              name=$(awk '/^name:/ { print $2; exit }' "$chart_dir/Chart.yaml")
-              version=$(awk '/^version:/ { print $2; exit }' "$chart_dir/Chart.yaml")
-              tag="${name}-${version}"
-              hack/release-notes.sh "$version" > "$notes"
-              gh release edit "$tag" --notes-file "$notes"
-              echo "::notice::$tag published with the release notes from CHANGELOG.md"
-            done
+          hack/release-notes.sh "$VERSION" "$SECTION" > "$notes"
+          chart_name=$(awk '/^name:/ { print $2; exit }' "$CHART_DIR/Chart.yaml")
+          package=".cr-release-packages/${chart_name}-${VERSION}.tgz"
+          args=(--title "$TAG" --notes-file "$notes")
+          if [ "$CHANNEL" = "rc" ]; then
+            args+=(--prerelease --latest=false)
+          else
+            args+=(--latest)
           fi
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release edit "$TAG" "${args[@]}"
+          else
+            gh release create "$TAG" --verify-tag "${args[@]}"
+          fi
+          gh release upload "$TAG" "$package" --clobber
+          echo "::notice::$TAG published from the ${CHANNEL} track with the CHANGELOG.md body"
+
+      # `cr index` reads the release and its asset back out of GitHub and
+      # rewrites `index.yaml` on gh-pages; the package it indexes is the one
+      # this job built. It keeps its local copy of the index at
+      # `.cr-index/index.yaml` and does not create the directory (the action's
+      # own script did), so a missing `.cr-index` fails after the release is
+      # already published.
+      - name: Publish the chart repository index
+        env:
+          CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY%%/*}"
+          repo="${GITHUB_REPOSITORY#*/}"
+          mkdir -p .cr-index
+          cr index -o "$owner" -r "$repo" --push
+
+      # The tag is the source of truth, so the branch records the release after
+      # the fact: a commit whose only change is the version line. A push made
+      # with GITHUB_TOKEN starts no run by itself, and `[skip ci]` keeps the
+      # commit out of a pipeline if the token ever changes to a PAT.
+      - name: Record the released version on main
+        env:
+          TAG: ${{ needs.release-tag.outputs.tag }}
+          VERSION: ${{ needs.release-tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin main
+          git checkout --quiet -B main origin/main
+
+          current=$(awk '/^version:/ { print $2; exit }' "$CHART_DIR/Chart.yaml")
+          if [ "$current" = "$VERSION" ]; then
+            echo "::notice::main already records ${VERSION}; nothing to commit"
+            exit 0
+          fi
+
+          # main never moves backwards: a release cut from an older commit (a
+          # backfill of an old line) publishes and leaves the branch alone, and
+          # patch releases on an older line would need a release branch that does
+          # not exist yet.
+          core_current="${current%%-*}"
+          core_released="${VERSION%%-*}"
+          if [ "$core_current" != "$core_released" ]; then
+            lower=$(printf '%s\n%s\n' "$core_current" "$core_released" | sort -V | head -n1)
+            if [ "$lower" = "$core_released" ]; then
+              echo "::warning::main records ${current}, which is newer than ${VERSION} - the branch is left alone"
+              exit 0
+            fi
+          fi
+
+          sed -i "s/^version: .*/version: ${VERSION}/" "$CHART_DIR/Chart.yaml"
+          grep -qxF "version: ${VERSION}" "$CHART_DIR/Chart.yaml"
+          git add "$CHART_DIR/Chart.yaml"
+          git commit --message "chore(release): record ${TAG} [skip ci]"
+          git push --quiet origin main
+          echo "::notice::main now records ${VERSION}"
 
       - name: Summarize
         env:
-          CHANGED_CHARTS: ${{ steps.release.outputs.changed_charts }}
+          TAG: ${{ needs.release-tag.outputs.tag }}
+          CHANNEL: ${{ needs.release-tag.outputs.channel }}
+          VERSION: ${{ needs.release-tag.outputs.version }}
         run: |
           set -euo pipefail
           {
             echo "### Chart release"
-            if [ -n "$CHANGED_CHARTS" ]; then
-              echo "Published: \`${CHANGED_CHARTS}\`"
-            else
-              echo "No chart version change detected - nothing was published."
-              echo "Bump \`version\` in \`${CHART_DIR}/Chart.yaml\` to publish a release."
-            fi
+            echo ""
+            echo "- \`${TAG}\` published from the ${CHANNEL} track"
+            echo "- chart version recorded on main: \`${VERSION}\`"
+            echo "- index: https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/index.yaml"
           } >> "$GITHUB_STEP_SUMMARY"

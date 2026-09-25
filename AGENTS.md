@@ -48,7 +48,7 @@ helm package charts/tuwunel
 - `lint` - `helm lint --strict` for the chart defaults and every `charts/tuwunel/ci/*-values.yaml`
   scenario, then `helm template` + `kubeconform -strict` for the **default values** and each
   scenario on the Kubernetes versions in `env.KUBERNETES_VERSIONS` (the defaults are what
-  chart-releaser publishes, so they are validated too). kubeconform has no built-in schema for
+  the release job packages as-is, so they are validated too). kubeconform has no built-in schema for
   `gateway.networking.k8s.io`, and `-strict` turns a missing schema into a failure, so the job
   downloads the `HTTPRoute`/`UDPRoute`/`TCPRoute` JSON schemas from a pinned `datreeio/CRDs-catalog`
   commit, checksum-verifies them, passes their directory as a second `-schema-location` next to
@@ -71,15 +71,27 @@ helm package charts/tuwunel
   TOML type (`allow_federation = "false"` makes tuwunel exit 1 at startup) or a readiness path
   that answers 403 in the default federation-disabled configuration; the other jobs check
   manifest shape only and never read the rendered config file.
-- `release` - `push` to `main` only, `needs: [lint, schema, runtime]`, runs `chart-releaser`. It packages
-  charts whose `version` is not released yet, creates the `tuwunel-<version>` tag and GitHub
-  release, and updates `index.yaml` on `gh-pages`. Unchanged versions are skipped, so a
-  documentation-only merge publishes nothing. The release body is not the action's - it has no
-  notes input - so steps after chart-releaser read `name`/`version` from each chart in the action's
-  `changed_charts` output and run `gh release edit <tag> --notes-file` with what
-  `hack/release-notes.sh` prints: the `## [<version>]` section of `CHANGELOG.md`, plus a compare
-  link. A released version with no such section fails the job, so a body can never silently stay
-  the chart `description`.
+- `release-tag` - a `push` of a `tuwunel-*` tag only, and it runs before the gates. It resolves the
+  release with `hack/release.sh --check "$GITHUB_REF_NAME"` - the same script that cuts the tag, so
+  the shape rules cannot drift - and refuses a tag that is not an ancestor of `origin/main`. A
+  version is either `<major>.<minor>.<patch>` (stable) or `<major>.<minor>.<patch>-rc.<n>` (release
+  candidate); anything else, and a missing `## [<version>]` CHANGELOG section, fails here in seconds
+  instead of after the ~25-minute `runtime` gate. It publishes `version`, `channel`, `section` and
+  `tag` as job outputs.
+- `release` - a `push` of a `tuwunel-*` tag only, `needs: [release-tag, lint, schema, runtime]`,
+  `concurrency: chart-release`. It packages the tagged tree itself with `helm package --version`
+  (the tag carries the version; the tree still records the previous release), reads the package back
+  to prove its `Chart.yaml` carries that version, then creates the GitHub release with
+  `gh release create`: the body is the `## [<version>]` section from
+  `hack/release-notes.sh "$VERSION" "$SECTION"`, the package is the uploaded asset, and the track is
+  the flag - `--prerelease --latest=false` for a candidate, `--latest` for a stable release (a
+  pre-release has to be born one: `cr` cannot create it, and an unflagged candidate is one consumers
+  see as stable). Then `cr index --push` rewrites `index.yaml` on `gh-pages`; the pinned `cr` comes
+  from `chart-releaser-action@v1.7.0` with `install_only: true`, because the action's own release
+  path packages "charts changed since the previous tag" and its script dies on an unbound variable
+  when packaging is skipped (fixed on its `main`, unreleased). Finally it commits
+  `chore(release): record <tag> [skip ci]` to `main`, recording the released `version`. Nothing is
+  published without a tag push: a merge publishes nothing.
 
 Rules that keep this honest:
 
@@ -92,7 +104,12 @@ Rules that keep this honest:
   must be rejected by a template `fail` (each names the value in its `# expect-error:` line).
   A fixture in the wrong folder makes the job that owns it fail, not pass.
 - The chart defaults are a supported configuration, so `lint` renders and validates them next to
-  the fixtures - chart-releaser publishes exactly those defaults.
+  the fixtures - the release job packages the tagged tree as-is, so the defaults are what users get.
+- A release is a pushed tag of one of two shapes - `tuwunel-<major>.<minor>.<patch>` (stable) or
+  `tuwunel-<major>.<minor>.<patch>-rc.<n>` (release candidate) - and `hack/release.sh <version>` is
+  the only thing that creates one. Nothing in the tree is bumped to publish: the version is stamped
+  into the package with `helm package --version` and recorded on `main` afterwards in a
+  `chore(release): record <tag> [skip ci]` commit.
 - `hack/runtime-check.sh` reads its images, env, paths and probes out of the render. If it needs to
   know something the manifests do not say, that is a bug in the manifests.
 - `hack/selector-check.py` is the gate that keeps `spec.selector` applyable: no selector, on a
@@ -232,10 +249,15 @@ charts/tuwunel/
 
 ### Version Updates
 
-1. Increment `version` in `charts/tuwunel/Chart.yaml`
-2. Update `appVersion` if application version changes
-3. Merge to `main` - the `release` job in `.github/workflows/ci.yaml` publishes to GitHub Releases
-   and GitHub Pages whenever the version is not released yet
+- No hand bump: a release is a pushed tag, and `version` in `charts/tuwunel/Chart.yaml` comes from it.
+  The `release` job stamps the tag's version into the package with `helm package --version` and
+  records it on `main` afterwards, in a `chore(release): record <tag> [skip ci]` commit. Do not edit
+  the line to publish a release.
+- Update `appVersion` in a pull request when the application version changes.
+- `CHANGELOG.md` has to carry the section the release publishes (`## [<version>]`, or for a candidate
+  the section of the version it is a candidate of) **before** `hack/release.sh <version>` cuts the
+  tag - the release body is that section, and both the script and the `release-tag` job refuse a tag
+  without one.
 
 ## Common Tasks
 
