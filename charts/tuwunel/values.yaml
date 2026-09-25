@@ -196,6 +196,9 @@ terminationGracePeriodSeconds: 1800
 ## README: args: ["--restore-backup", "--maintenance"]
 args: []
 
+## Number of tuwunel replicas
+replicas: 1
+
 service:
   annotations: {}
   type: ClusterIP
