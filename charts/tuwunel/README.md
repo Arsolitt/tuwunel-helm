@@ -50,7 +50,7 @@ Breaking changes:
 - **`config.global.port` must equal `service.port`, and `config.global.server_name` must equal
   `server_name`**, or the render fails with
   `config.global.port (8008) must equal service.port (8080): the chart sets TUWUNEL_PORT from
-  service.port`. An environment variable beats the configuration file, so a differing value would
+service.port`. An environment variable beats the configuration file, so a differing value would
   otherwise be silently ignored.
 - **Editing `config` or the env vars now rolls the pod** (a `checksum/config` annotation covers the
   rendered ConfigMap plus `env`/`envRaw`/`envFromSecret`), and `terminationGracePeriodSeconds`
@@ -88,19 +88,19 @@ The following tables list the configurable parameters of the tuwunel chart and t
 
 ### Core Configuration
 
-| Parameter                          | Description                                                                                 | Default                            |
-| ---------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `server_name`                      | Server name (your Matrix domain)                                                            | `yourdomain.com`                   |
-| `image.repository`                 | Image repository                                                                            | `ghcr.io/matrix-construct/tuwunel` |
-| `image.tag`                        | Image tag; needs v1.9.0 or newer for the chart's env and probe contract                      | `v1.9.2`                           |
-| `image.pullPolicy`                 | Image pull policy                                                                           | `IfNotPresent`                     |
-| `initContainer.image.repository`   | Init container image for envsubst                                                           | `dibi/envsubst`                    |
-| `initContainer.image.tag`          | Init container image tag                                                                    | `1`                                |
-| `initContainer.image.pullPolicy`   | Init container pull policy                                                                  | `IfNotPresent`                     |
-| `busybox.image.repository`         | Image for the backup cron sidecar and the `helm test` pod                                   | `busybox`                          |
-| `busybox.image.tag`                | busybox tag (has to stay multi-arch)                                                        | `1.37`                             |
-| `busybox.image.pullPolicy`         | busybox pull policy                                                                         | `IfNotPresent`                     |
-| `imagePullSecrets`                 | Pull secrets for every pod the chart creates                                                | `[]`                               |
+| Parameter                        | Description                                                             | Default                            |
+| -------------------------------- | ----------------------------------------------------------------------- | ---------------------------------- |
+| `server_name`                    | Server name (your Matrix domain)                                        | `yourdomain.com`                   |
+| `image.repository`               | Image repository                                                        | `ghcr.io/matrix-construct/tuwunel` |
+| `image.tag`                      | Image tag; needs v1.9.0 or newer for the chart's env and probe contract | `v1.9.2`                           |
+| `image.pullPolicy`               | Image pull policy                                                       | `IfNotPresent`                     |
+| `initContainer.image.repository` | Init container image for envsubst                                       | `dibi/envsubst`                    |
+| `initContainer.image.tag`        | Init container image tag                                                | `1`                                |
+| `initContainer.image.pullPolicy` | Init container pull policy                                              | `IfNotPresent`                     |
+| `busybox.image.repository`       | Image for the backup cron sidecar and the `helm test` pod               | `busybox`                          |
+| `busybox.image.tag`              | busybox tag (has to stay multi-arch)                                    | `1.37`                             |
+| `busybox.image.pullPolicy`       | busybox pull policy                                                     | `IfNotPresent`                     |
+| `imagePullSecrets`               | Pull secrets for every pod the chart creates                            | `[]`                               |
 
 `dibi/envsubst:1` is published for `linux/amd64` only. On an arm64 node either point
 `initContainer.image` at a multi-arch (or mirrored) equivalent or pin the pod to an amd64 node;
@@ -113,16 +113,17 @@ as `InvalidImageName`.
 
 ### Environment Variables
 
-| Parameter              | Description                                          | Default |
-| ---------------------- | ---------------------------------------------------- | ------- |
-| `env`                  | Plain text environment variables for config          | `{}`    |
-| `envRaw`               | Raw environment variable sections (complex configs)  | `[]`    |
-| `envFromSecret`        | Environment variables from Kubernetes secrets        | `{}`    |
-| `extraEnv`             | Additional environment variables for the container   | `[]`    |
+| Parameter       | Description                                         | Default |
+| --------------- | --------------------------------------------------- | ------- |
+| `env`           | Plain text environment variables for config         | `{}`    |
+| `envRaw`        | Raw environment variable sections (complex configs) | `[]`    |
+| `envFromSecret` | Environment variables from Kubernetes secrets       | `{}`    |
+| `extraEnv`      | Additional environment variables for the container  | `[]`    |
 
 Format for `envFromSecret`: `ENV_VAR: secretName/secretKey`
 
 Example:
+
 ```yaml
 envFromSecret:
   REGISTRATION_TOKEN: tuwunel-secrets/REGISTRATION_TOKEN
@@ -142,22 +143,22 @@ apply time.
 
 The `config` section is converted directly into the tuwunel configuration file. See the [tuwunel documentation](https://github.com/matrix-construct/tuwunel) for all available options.
 
-| Parameter                                   | Description                                                                                 | Default                  |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------ |
-| `config.global.address`                     | Address tuwunel listens on; `::` is a dual-stack socket, `0.0.0.0` is IPv4 only             | `::`                     |
-| `config.global.allow_registration`          | Whether to allow users to register new accounts                                             | `false`                  |
-| `config.global.allow_federation`            | Whether to allow federating with other Matrix servers                                       | `false`                  |
-| `config.global.trusted_servers`             | Servers to trust when federating                                                            | `[]`                     |
-| `config.global.tls`                         | TLS configuration                                                                           | `{}`                     |
-| `config.global.log`                         | Log level: `trace`, `debug`, `info`, `warn`, `error`                                        | `info`                   |
-| `config.global.ip_source`                   | Where the client IP is read from (`connect_info` plus 7 header sources); see below          | unset (`connect_info`)   |
-| `config.global.ip_source_trusted_subnets`   | CIDRs that keep their connection address instead of `ip_source`                             | unset (`[]`)             |
-| `config.global.db_pool_max_workers`         | RocksDB thread pool size; upstream default 2048 can exceed the pod task limit                | unset (upstream `2048`)  |
-| `config.global.well_known.client`           | Client delegation URL (for delegated domains)                                               |                          |
-| `config.global.well_known.server`           | Server delegation: a bare `host:port`, never a URL - the render refuses a scheme             |                          |
-| `config.global.well_known.livekit_url`      | MatrixRTC focus URL; set by the chart when `rtc.enabled` is true                            |                          |
-| `config.global.well_known.rtc_transports`   | RTC transports for Element Call; escape hatch for a non-LiveKit focus                       |                          |
-| `config.global.ldap`                        | LDAP configuration                                                                          | `{}`                     |
+| Parameter                                 | Description                                                                        | Default                 |
+| ----------------------------------------- | ---------------------------------------------------------------------------------- | ----------------------- |
+| `config.global.address`                   | Address tuwunel listens on; `::` is a dual-stack socket, `0.0.0.0` is IPv4 only    | `::`                    |
+| `config.global.allow_registration`        | Whether to allow users to register new accounts                                    | `false`                 |
+| `config.global.allow_federation`          | Whether to allow federating with other Matrix servers                              | `false`                 |
+| `config.global.trusted_servers`           | Servers to trust when federating                                                   | `[]`                    |
+| `config.global.tls`                       | TLS configuration                                                                  | `{}`                    |
+| `config.global.log`                       | Log level: `trace`, `debug`, `info`, `warn`, `error`                               | `info`                  |
+| `config.global.ip_source`                 | Where the client IP is read from (`connect_info` plus 7 header sources); see below | unset (`connect_info`)  |
+| `config.global.ip_source_trusted_subnets` | CIDRs that keep their connection address instead of `ip_source`                    | unset (`[]`)            |
+| `config.global.db_pool_max_workers`       | RocksDB thread pool size; upstream default 2048 can exceed the pod task limit      | unset (upstream `2048`) |
+| `config.global.well_known.client`         | Client delegation URL (for delegated domains)                                      |                         |
+| `config.global.well_known.server`         | Server delegation: a bare `host:port`, never a URL - the render refuses a scheme   |                         |
+| `config.global.well_known.livekit_url`    | MatrixRTC focus URL; set by the chart when `rtc.enabled` is true                   |                         |
+| `config.global.well_known.rtc_transports` | RTC transports for Element Call; escape hatch for a non-LiveKit focus              |                         |
+| `config.global.ldap`                      | LDAP configuration                                                                 | `{}`                    |
 
 Everything else under `config` is written to `config.toml` as-is, so any upstream key works as
 long as it is valid TOML.
@@ -213,15 +214,15 @@ value as `TUWUNEL_ADDRESS`.
 
 ### Service Configuration
 
-| Parameter                          | Description                                                                                 | Default                            |
-| ---------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `service.annotations`              | Annotations for Service resource                                                            | `{}`                               |
-| `service.type`                     | Type of service: `ClusterIP`, `NodePort` or `LoadBalancer` (`ExternalName` unsupported)     | `ClusterIP`                        |
-| `service.clusterIP`                | `None` makes it headless (what the StatefulSet needs); rendered for `ClusterIP` only        | `None`                             |
-| `service.port`                     | Port to expose service; the chart's single port knob                                        | `8080`                             |
-| `service.externalIPs`              | External IPs for service                                                                    | `[]`                               |
-| `service.loadBalancerIP`           | Load balancer IP; rendered when `type` is `LoadBalancer`                                    | `""`                               |
-| `service.loadBalancerSourceRanges` | List of IP CIDRs allowed to access the load balancer; `LoadBalancer` only                   | `[]`                               |
+| Parameter                          | Description                                                                             | Default     |
+| ---------------------------------- | --------------------------------------------------------------------------------------- | ----------- |
+| `service.annotations`              | Annotations for Service resource                                                        | `{}`        |
+| `service.type`                     | Type of service: `ClusterIP`, `NodePort` or `LoadBalancer` (`ExternalName` unsupported) | `ClusterIP` |
+| `service.clusterIP`                | `None` makes it headless (what the StatefulSet needs); rendered for `ClusterIP` only    | `None`      |
+| `service.port`                     | Port to expose service; the chart's single port knob                                    | `8080`      |
+| `service.externalIPs`              | External IPs for service                                                                | `[]`        |
+| `service.loadBalancerIP`           | Load balancer IP; rendered when `type` is `LoadBalancer`                                | `""`        |
+| `service.loadBalancerSourceRanges` | List of IP CIDRs allowed to access the load balancer; `LoadBalancer` only               | `[]`        |
 
 `service.type` accepts `ClusterIP`, `NodePort` and `LoadBalancer`. `ExternalName` is not one of
 them: the chart renders no `externalName`, so a Service of that type could never be valid.
@@ -240,15 +241,15 @@ being ignored (see [Upgrading to 2.0.0](#upgrading-to-200)).
 
 ### Ingress Configuration
 
-| Parameter                    | Description                                           | Default       |
-| ---------------------------- | ----------------------------------------------------- | ------------- |
-| `ingress.enabled`            | Whether to deploy the Ingress resource                | `false`       |
-| `ingress.class`              | Ingress class                                         | `""`          |
-| `ingress.annotations`        | Ingress annotations                                   | `{}`          |
-| `ingress.path`               | Ingress path                                          | `/`           |
-| `ingress.extraHosts`         | Additional hostnames                                  | `[]`          |
-| `ingress.tls`                | Whether to configure TLS for the ingress              | `false`       |
-| `ingress.tlsSecretName`      | TLS secret name (defaults to `<release-name>-tls`)    | `""`          |
+| Parameter               | Description                                        | Default |
+| ----------------------- | -------------------------------------------------- | ------- |
+| `ingress.enabled`       | Whether to deploy the Ingress resource             | `false` |
+| `ingress.class`         | Ingress class                                      | `""`    |
+| `ingress.annotations`   | Ingress annotations                                | `{}`    |
+| `ingress.path`          | Ingress path                                       | `/`     |
+| `ingress.extraHosts`    | Additional hostnames                               | `[]`    |
+| `ingress.tls`           | Whether to configure TLS for the ingress           | `false` |
+| `ingress.tlsSecretName` | TLS secret name (defaults to `<release-name>-tls`) | `""`    |
 
 `ingress.tls: true` adds one `spec.tls` entry covering every hostname the rules serve:
 `server_name`, the delegated domain from `config.global.well_known.server` when one is set, and
@@ -282,12 +283,12 @@ is stripped and a scheme fails the render - so a route hostname is always a bare
 catch-all `PathPrefix /` rule points at `<fullname>:service.port`; with both hostnames listed, one
 rule covers what the Ingress splits into separate path sets.
 
-| Parameter             | Description                                             | Default         |
-| --------------------- | ------------------------------------------------------- | --------------- |
-| `gateway.enabled`     | Render the homeserver `HTTPRoute`                       | `false`         |
-| `gateway.parentRefs`  | Gateways the route attaches to                          | `[]`            |
-| `gateway.hostnames`   | Additional hostnames for the route                      | `[]`            |
-| `gateway.annotations` | Annotations for the `HTTPRoute`                         | `{}`            |
+| Parameter             | Description                        | Default |
+| --------------------- | ---------------------------------- | ------- |
+| `gateway.enabled`     | Render the homeserver `HTTPRoute`  | `false` |
+| `gateway.parentRefs`  | Gateways the route attaches to     | `[]`    |
+| `gateway.hostnames`   | Additional hostnames for the route | `[]`    |
+| `gateway.annotations` | Annotations for the `HTTPRoute`    | `{}`    |
 
 A `parentRefs` entry needs at least a `name`; `namespace` defaults to the release namespace when
 omitted and `sectionName` picks one listener of a multi-listener Gateway (TLS and hostname binding
@@ -322,11 +323,11 @@ exactly like `rtc.ingress`; `gateway.enabled` is not required for it, but it nee
 `rtc.gateway.parentRefs` or the shared `gateway.parentRefs`, and a render with neither fails with a
 message naming `rtc.gateway.parentRefs`.
 
-| Parameter                 | Description                                             | Default |
-| ------------------------- | ------------------------------------------------------- | ------- |
-| `rtc.gateway.enabled`     | Render the RTC `HTTPRoute`                              | `false` |
-| `rtc.gateway.parentRefs`  | Gateways the RTC route attaches to                      | `[]`    |
-| `rtc.gateway.annotations` | Annotations for the RTC `HTTPRoute`                     | `{}`    |
+| Parameter                 | Description                         | Default |
+| ------------------------- | ----------------------------------- | ------- |
+| `rtc.gateway.enabled`     | Render the RTC `HTTPRoute`          | `false` |
+| `rtc.gateway.parentRefs`  | Gateways the RTC route attaches to  | `[]`    |
+| `rtc.gateway.annotations` | Annotations for the RTC `HTTPRoute` | `{}`    |
 
 LiveKit's media is UDP and raw TCP, which an `HTTPRoute` cannot carry, so the chart renders a
 `UDPRoute` named `<fullname>-livekit-udp` and a `TCPRoute` named `<fullname>-livekit-tcp` - in
@@ -337,12 +338,12 @@ on the Service in `rtc.livekit.service`, and the routes target `config.rtc.udp_p
 `config.rtc.tcp_port`. A route whose port is unset fails the render with a message naming that port
 value.
 
-| Parameter                         | Description                                             | Default |
-| --------------------------------- | ------------------------------------------------------- | ------- |
-| `rtc.livekit.gateway.udpRoute`    | Render a `UDPRoute` for `config.rtc.udp_port`           | `false` |
-| `rtc.livekit.gateway.tcpRoute`    | Render a `TCPRoute` for `config.rtc.tcp_port`           | `false` |
-| `rtc.livekit.gateway.parentRefs`  | Gateways the media routes attach to                     | `[]`    |
-| `rtc.livekit.gateway.annotations` | Annotations for the media routes                        | `{}`    |
+| Parameter                         | Description                                   | Default |
+| --------------------------------- | --------------------------------------------- | ------- |
+| `rtc.livekit.gateway.udpRoute`    | Render a `UDPRoute` for `config.rtc.udp_port` | `false` |
+| `rtc.livekit.gateway.tcpRoute`    | Render a `TCPRoute` for `config.rtc.tcp_port` | `false` |
+| `rtc.livekit.gateway.parentRefs`  | Gateways the media routes attach to           | `[]`    |
+| `rtc.livekit.gateway.annotations` | Annotations for the media routes              | `{}`    |
 
 The media routes also need `rtc.enabled`, and `rtc.livekit.gateway.parentRefs` falls back to
 `gateway.parentRefs` - not to `rtc.gateway.parentRefs`, so a media-only configuration needs its own
@@ -360,14 +361,14 @@ homeserver and RTC `HTTPRoute`s are unaffected.
 
 ### Persistence Configuration
 
-| Parameter                          | Description                                           | Default          |
-| ---------------------------------- | ----------------------------------------------------- | ---------------- |
-| `persistence.data.enabled`         | Use persistent volume to store data                   | `true`           |
-| `persistence.data.size`            | Size of persistent volume claim                       | `4Gi`            |
-| `persistence.data.existingClaim`   | Use an existing PVC to persist data                   | `""`             |
-| `persistence.data.storageClass`    | Storage class for the data claim                      | `""`             |
-| `persistence.data.accessMode`      | PVC access mode                                       | `ReadWriteOnce`  |
-| `pvcAnnotations`                   | Annotations added to every PVC the chart creates       | `{}`             |
+| Parameter                        | Description                                      | Default         |
+| -------------------------------- | ------------------------------------------------ | --------------- |
+| `persistence.data.enabled`       | Use persistent volume to store data              | `true`          |
+| `persistence.data.size`          | Size of persistent volume claim                  | `4Gi`           |
+| `persistence.data.existingClaim` | Use an existing PVC to persist data              | `""`            |
+| `persistence.data.storageClass`  | Storage class for the data claim                 | `""`            |
+| `persistence.data.accessMode`    | PVC access mode                                  | `ReadWriteOnce` |
+| `pvcAnnotations`                 | Annotations added to every PVC the chart creates | `{}`            |
 
 `storageClass` (here and in `backup`, below) is a three-way switch:
 
@@ -406,19 +407,19 @@ What `backup.enabled: true` renders:
   server process. SIGUSR2 makes the server run the configured admin command, i.e. the same online
   backup as `!admin server backup-database`.
 
-| Parameter                    | Description                                                          | Default                |
-| ---------------------------- | -------------------------------------------------------------------- | ---------------------- |
-| `backup.enabled`             | Create the backup volume and render the backup configuration keys     | `false`                |
-| `backup.existingClaim`       | Use an existing claim instead of creating `<fullname>-backup`         | `""`                   |
-| `backup.storageClass`        | Storage class for the backup claim (same three-way rule as above)     | `""`                   |
-| `backup.accessMode`          | Backup PVC access mode                                               | `ReadWriteOnce`        |
-| `backup.size`                | Backup PVC size                                                      | `5Gi`                  |
-| `backup.path`                | Mount path and `database_backup_path`; keep it off the data volume    | `/backups`             |
-| `backup.keep`                | `database_backups_to_keep`; older backups are pruned after a new one  | `7`                    |
-| `backup.scheduled`           | Add the SIGUSR2 cron sidecar and crontab ConfigMap; needs `enabled`   | `false`                |
-| `backup.schedule`            | Five-field cron expression for the sidecar                           | `0 3 * * *`            |
-| `backup.command`             | The admin command a SIGUSR2 runs (`admin_signal_execute`)            | `server backup-database` |
-| `backup.sidecar.resources`   | Resources for the cron sidecar                                       | 10m/32Mi requests, 100m/64Mi limits |
+| Parameter                  | Description                                                          | Default                             |
+| -------------------------- | -------------------------------------------------------------------- | ----------------------------------- |
+| `backup.enabled`           | Create the backup volume and render the backup configuration keys    | `false`                             |
+| `backup.existingClaim`     | Use an existing claim instead of creating `<fullname>-backup`        | `""`                                |
+| `backup.storageClass`      | Storage class for the backup claim (same three-way rule as above)    | `""`                                |
+| `backup.accessMode`        | Backup PVC access mode                                               | `ReadWriteOnce`                     |
+| `backup.size`              | Backup PVC size                                                      | `5Gi`                               |
+| `backup.path`              | Mount path and `database_backup_path`; keep it off the data volume   | `/backups`                          |
+| `backup.keep`              | `database_backups_to_keep`; older backups are pruned after a new one | `7`                                 |
+| `backup.scheduled`         | Add the SIGUSR2 cron sidecar and crontab ConfigMap; needs `enabled`  | `false`                             |
+| `backup.schedule`          | Five-field cron expression for the sidecar                           | `0 3 * * *`                         |
+| `backup.command`           | The admin command a SIGUSR2 runs (`admin_signal_execute`)            | `server backup-database`            |
+| `backup.sidecar.resources` | Resources for the cron sidecar                                       | 10m/32Mi requests, 100m/64Mi limits |
 
 `backup.scheduled: true` requires `backup.enabled: true`. The cron sidecar mounts the crontab
 ConfigMap, and that ConfigMap is rendered only when both are set, so the combination is refused at
@@ -497,8 +498,8 @@ config:
     storage_provider:
       media_on_s3:
         s3:
-          url: "s3://tuwunel-media/matrix"          # or bucket/region/base_path separately
-          endpoint: "https://s3.example.com"        # self-hosted / non-AWS endpoints
+          url: "s3://tuwunel-media/matrix" # or bucket/region/base_path separately
+          endpoint: "https://s3.example.com" # self-hosted / non-AWS endpoints
           region: "us-east-1"
           key: "${S3_ACCESS_KEY}"
           secret: "${S3_SECRET_KEY}"
@@ -550,7 +551,7 @@ on v1.9.2 with `ip_source: rightmost_x_forwarded_for`:
   still answer 200;
 - startup logs a warning:
   `ip_source is set to RightmostXForwardedFor, a header-based source. Ensure a trusted reverse
-  proxy populates this header for every request; otherwise clients can spoof their IP address.`
+proxy populates this header for every request; otherwise clients can spoof their IP address.`
 
 `ip_source_trusted_subnets` is the escape hatch for peers whose connection address is already
 trustworthy: they bypass `ip_source` entirely. Put the in-cluster pod CIDR there so probes and
@@ -605,11 +606,11 @@ All three probes are exec probes running `tuwunel --health-check` inside the con
 the running server whether it is healthy instead of dialing a path that may answer for an
 unrelated reason.
 
-| Parameter                        | Description                                                            | Default                                 |
-| -------------------------------- | ---------------------------------------------------------------------- | --------------------------------------- |
-| `probes.startup`                 | First-start probe; covers the one-time database migration               | `enabled: true`, 10s x 180 = 30 minutes |
-| `probes.readiness`               | Readiness probe                                                         | `enabled: true`, 10s, threshold 3       |
-| `probes.liveness`                | Liveness probe                                                          | `enabled: true`, 10s, threshold 3       |
+| Parameter          | Description                                               | Default                                 |
+| ------------------ | --------------------------------------------------------- | --------------------------------------- |
+| `probes.startup`   | First-start probe; covers the one-time database migration | `enabled: true`, 10s x 180 = 30 minutes |
+| `probes.readiness` | Readiness probe                                           | `enabled: true`, 10s, threshold 3       |
+| `probes.liveness`  | Liveness probe                                            | `enabled: true`, 10s, threshold 3       |
 
 Each block takes `enabled`, `periodSeconds`, `timeoutSeconds`, `failureThreshold` and
 `initialDelaySeconds`; the defaults are `true/10/5/180/0` for the startup probe and
@@ -631,20 +632,21 @@ removes the failure mode on large machines.
 
 ### Pod Configuration
 
-| Parameter                          | Description                                                     | Default  |
-| ---------------------------------- | --------------------------------------------------------------- | -------- |
-| `terminationGracePeriodSeconds`    | Grace period; has to cover the one-time migration                | `1800`   |
-| `args`                             | Extra arguments for the tuwunel container (restore recipe)        | `[]`     |
-| `podLabels`                        | Labels added to the pod template                                  | `{}`     |
-| `podAnnotations`                   | Annotations added to the pod template                             | `{}`     |
-| `priorityClassName`                | Pod `priorityClassName`, applied when set                         | `""`     |
-| `nodeSelector`                     | Node labels for pod assignment                                    | `{}`     |
-| `tolerations`                      | Toleration labels for pod assignment                              | `[]`     |
-| `affinity`                         | Affinity settings for pod assignment                              | `{}`     |
-| `extraVolumes`                     | Extra volumes for the tuwunel container                           | `[]`     |
-| `extraVolumeMounts`                | Extra mounts; each entry needs `name` and a `mountPath`           | `[]`     |
-| `extraLabels`                      | Additional labels for all resources                               | `{}`     |
-| `statefulsetAnnotations`           | Annotations for the StatefulSet                                   | `{}`     |
+| Parameter                       | Description                                                | Default |
+| ------------------------------- | ---------------------------------------------------------- | ------- |
+| `terminationGracePeriodSeconds` | Grace period; has to cover the one-time migration          | `1800`  |
+| `args`                          | Extra arguments for the tuwunel container (restore recipe) | `[]`    |
+| `replicas`                      | Number of StatefulSet replicas                             | `1`     |
+| `podLabels`                     | Labels added to the pod template                           | `{}`    |
+| `podAnnotations`                | Annotations added to the pod template                      | `{}`    |
+| `priorityClassName`             | Pod `priorityClassName`, applied when set                  | `""`    |
+| `nodeSelector`                  | Node labels for pod assignment                             | `{}`    |
+| `tolerations`                   | Toleration labels for pod assignment                       | `[]`    |
+| `affinity`                      | Affinity settings for pod assignment                       | `{}`    |
+| `extraVolumes`                  | Extra volumes for the tuwunel container                    | `[]`    |
+| `extraVolumeMounts`             | Extra mounts; each entry needs `name` and a `mountPath`    | `[]`    |
+| `extraLabels`                   | Additional labels for all resources                        | `{}`    |
+| `statefulsetAnnotations`        | Annotations for the StatefulSet                            | `{}`    |
 
 `extraVolumeMounts` entries are appended after the chart's own mounts; a `name` has to match one of
 `extraVolumes` or one of the chart's volumes (`data`, `config-template`, `config`, `tmp`, `backup`).
@@ -653,10 +655,10 @@ the environment, so a values edit rolls the pod.
 
 ### Resource Configuration
 
-| Parameter              | Description                   | Default         |
-| ---------------------- | ----------------------------- | --------------- |
-| `resources.requests`   | CPU/Memory resource requests  | 50m/128Mi       |
-| `resources.limits`     | CPU/Memory resource limits    | 1/512Mi         |
+| Parameter            | Description                  | Default   |
+| -------------------- | ---------------------------- | --------- |
+| `resources.requests` | CPU/Memory resource requests | 50m/128Mi |
+| `resources.limits`   | CPU/Memory resource limits   | 1/512Mi   |
 
 The CPU limit also derives the thread counts the chart passes to the server
 (`TOKIO_WORKER_THREADS` and `TUWUNEL_ROCKSDB_PARALLELISM_THREADS`).
@@ -825,55 +827,55 @@ TURN: pass an external TURN server through to clients with `rtc.livekit.config.r
 
 ### RTC Configuration Parameters
 
-| Parameter                              | Description                                           | Default                    |
-| -------------------------------------- | ----------------------------------------------------- | -------------------------- |
-| `rtc.enabled`                          | Enable Matrix RTC support                             | `false`                    |
-| `rtc.domain`                           | Bare lowercase hostname; no scheme or port            | `""`                       |
-| `rtc.jwt.image.repository`             | JWT service image                                     | `ghcr.io/element-hq/lk-jwt-service` |
-| `rtc.jwt.image.tag`                    | JWT service image tag                                 | `0.7.0`                    |
-| `rtc.jwt.resources`                    | JWT service resources                                 | 50m-200m/128Mi-256Mi       |
-| `rtc.jwt.env`                          | JWT service environment variables (defaults derived)  | `{}`                       |
-| `rtc.jwt.envRaw`                       | Raw environment variable sections                     | `[]`                       |
-| `rtc.jwt.envFromSecret`                | JWT service env from secrets                          | `{}`                       |
-| `rtc.jwt.podAnnotations`               | Annotations for the JWT pod                           | `{}`                       |
-| `rtc.jwt.nodeSelector`                 | Node labels for the JWT pod                           | `{}`                       |
-| `rtc.jwt.tolerations`                  | Tolerations for the JWT pod                           | `[]`                       |
-| `rtc.jwt.affinity`                     | Affinity for the JWT pod                              | `{}`                       |
-| `rtc.livekit.image.repository`         | LiveKit server image                                  | `livekit/livekit-server`   |
-| `rtc.livekit.image.tag`                | LiveKit server image tag                              | `v1.13.7`                  |
-| `rtc.livekit.resources`                | LiveKit server resources                              | 50m-1/128Mi-1Gi            |
-| `rtc.livekit.networkMode`              | `hostNetwork` or `pod`                                | `hostNetwork`              |
-| `rtc.livekit.gateway.udpRoute`         | `UDPRoute` for `config.rtc.udp_port`                  | `false`                    |
-| `rtc.livekit.gateway.tcpRoute`         | `TCPRoute` for `config.rtc.tcp_port`                  | `false`                    |
-| `rtc.livekit.gateway.parentRefs`       | Gateways the media routes attach to                   | `[]`                       |
-| `rtc.livekit.gateway.annotations`      | Annotations for the media routes                      | `{}`                       |
-| `rtc.livekit.env`                      | LiveKit environment variables                         | `{}`                       |
-| `rtc.livekit.envRaw`                   | Raw environment variable sections                     | `[]`                       |
-| `rtc.livekit.envFromSecret`            | LiveKit env from secrets (needs `LIVEKIT_KEY`/`LIVEKIT_SECRET`) | `{}`              |
-| `rtc.livekit.podAnnotations`           | Annotations for the LiveKit pod                       | `{}`                       |
-| `rtc.livekit.nodeSelector`             | Node labels for the LiveKit pod                       | `{}`                       |
-| `rtc.livekit.tolerations`              | Tolerations for the LiveKit pod                       | `[]`                       |
-| `rtc.livekit.affinity`                 | Affinity for the LiveKit pod                          | `{}`                       |
-| `rtc.livekit.service.type`             | LiveKit Service type (used in `pod` mode)             | `ClusterIP`                |
-| `rtc.livekit.service.annotations`      | LiveKit Service annotations                           | `{}`                       |
-| `rtc.livekit.service.externalTrafficPolicy` | `Cluster` or `Local`; `Local` is what a LoadBalancer should use | `Cluster`    |
-| `rtc.livekit.service.loadBalancerIP`   | Load balancer IP for the LiveKit Service              | `""`                       |
-| `rtc.livekit.service.loadBalancerSourceRanges` | Allowed CIDRs for the LiveKit Service         | `[]`                       |
-| `rtc.livekit.config.port`              | HTTP API port; a port number, digits only             | `7880`                     |
-| `rtc.livekit.config.rtc.tcp_port`      | RTC TCP port                                          | `7881`                     |
-| `rtc.livekit.config.rtc.port_range_start` | UDP port range start (hostNetwork)                 | `50100`                    |
-| `rtc.livekit.config.rtc.port_range_end` | UDP port range end (hostNetwork)                     | `50200`                    |
-| `rtc.livekit.config.rtc.udp_port`      | Single multiplexed UDP port (required in `pod` mode)  | unset                      |
-| `rtc.livekit.config.rtc.use_external_ip` | Ask an external service for the advertised IP       | `true`                     |
-| `rtc.livekit.config.rtc.node_ip`       | Address advertised to clients when `use_external_ip` is false | unset              |
-| `rtc.ingress.enabled`                  | Enable RTC ingress                                    | `false`                    |
-| `rtc.ingress.class`                    | Ingress class; falls back to `ingress.class`          | `""`                       |
-| `rtc.ingress.annotations`              | Extra ingress annotations (applied last)              | `{}`                       |
-| `rtc.ingress.tls`                      | Enable TLS                                            | `false`                    |
-| `rtc.ingress.tlsSecretName`            | TLS secret name (defaults to `<release-name>-rtc-tls`) | `""`                      |
-| `rtc.gateway.enabled`                  | Enable the RTC HTTPRoute                              | `false`                    |
-| `rtc.gateway.parentRefs`               | Gateways the RTC route attaches to                    | `[]`                       |
-| `rtc.gateway.annotations`              | Annotations for the RTC HTTPRoute                     | `{}`                       |
+| Parameter                                      | Description                                                     | Default                             |
+| ---------------------------------------------- | --------------------------------------------------------------- | ----------------------------------- |
+| `rtc.enabled`                                  | Enable Matrix RTC support                                       | `false`                             |
+| `rtc.domain`                                   | Bare lowercase hostname; no scheme or port                      | `""`                                |
+| `rtc.jwt.image.repository`                     | JWT service image                                               | `ghcr.io/element-hq/lk-jwt-service` |
+| `rtc.jwt.image.tag`                            | JWT service image tag                                           | `0.7.0`                             |
+| `rtc.jwt.resources`                            | JWT service resources                                           | 50m-200m/128Mi-256Mi                |
+| `rtc.jwt.env`                                  | JWT service environment variables (defaults derived)            | `{}`                                |
+| `rtc.jwt.envRaw`                               | Raw environment variable sections                               | `[]`                                |
+| `rtc.jwt.envFromSecret`                        | JWT service env from secrets                                    | `{}`                                |
+| `rtc.jwt.podAnnotations`                       | Annotations for the JWT pod                                     | `{}`                                |
+| `rtc.jwt.nodeSelector`                         | Node labels for the JWT pod                                     | `{}`                                |
+| `rtc.jwt.tolerations`                          | Tolerations for the JWT pod                                     | `[]`                                |
+| `rtc.jwt.affinity`                             | Affinity for the JWT pod                                        | `{}`                                |
+| `rtc.livekit.image.repository`                 | LiveKit server image                                            | `livekit/livekit-server`            |
+| `rtc.livekit.image.tag`                        | LiveKit server image tag                                        | `v1.13.7`                           |
+| `rtc.livekit.resources`                        | LiveKit server resources                                        | 50m-1/128Mi-1Gi                     |
+| `rtc.livekit.networkMode`                      | `hostNetwork` or `pod`                                          | `hostNetwork`                       |
+| `rtc.livekit.gateway.udpRoute`                 | `UDPRoute` for `config.rtc.udp_port`                            | `false`                             |
+| `rtc.livekit.gateway.tcpRoute`                 | `TCPRoute` for `config.rtc.tcp_port`                            | `false`                             |
+| `rtc.livekit.gateway.parentRefs`               | Gateways the media routes attach to                             | `[]`                                |
+| `rtc.livekit.gateway.annotations`              | Annotations for the media routes                                | `{}`                                |
+| `rtc.livekit.env`                              | LiveKit environment variables                                   | `{}`                                |
+| `rtc.livekit.envRaw`                           | Raw environment variable sections                               | `[]`                                |
+| `rtc.livekit.envFromSecret`                    | LiveKit env from secrets (needs `LIVEKIT_KEY`/`LIVEKIT_SECRET`) | `{}`                                |
+| `rtc.livekit.podAnnotations`                   | Annotations for the LiveKit pod                                 | `{}`                                |
+| `rtc.livekit.nodeSelector`                     | Node labels for the LiveKit pod                                 | `{}`                                |
+| `rtc.livekit.tolerations`                      | Tolerations for the LiveKit pod                                 | `[]`                                |
+| `rtc.livekit.affinity`                         | Affinity for the LiveKit pod                                    | `{}`                                |
+| `rtc.livekit.service.type`                     | LiveKit Service type (used in `pod` mode)                       | `ClusterIP`                         |
+| `rtc.livekit.service.annotations`              | LiveKit Service annotations                                     | `{}`                                |
+| `rtc.livekit.service.externalTrafficPolicy`    | `Cluster` or `Local`; `Local` is what a LoadBalancer should use | `Cluster`                           |
+| `rtc.livekit.service.loadBalancerIP`           | Load balancer IP for the LiveKit Service                        | `""`                                |
+| `rtc.livekit.service.loadBalancerSourceRanges` | Allowed CIDRs for the LiveKit Service                           | `[]`                                |
+| `rtc.livekit.config.port`                      | HTTP API port; a port number, digits only                       | `7880`                              |
+| `rtc.livekit.config.rtc.tcp_port`              | RTC TCP port                                                    | `7881`                              |
+| `rtc.livekit.config.rtc.port_range_start`      | UDP port range start (hostNetwork)                              | `50100`                             |
+| `rtc.livekit.config.rtc.port_range_end`        | UDP port range end (hostNetwork)                                | `50200`                             |
+| `rtc.livekit.config.rtc.udp_port`              | Single multiplexed UDP port (required in `pod` mode)            | unset                               |
+| `rtc.livekit.config.rtc.use_external_ip`       | Ask an external service for the advertised IP                   | `true`                              |
+| `rtc.livekit.config.rtc.node_ip`               | Address advertised to clients when `use_external_ip` is false   | unset                               |
+| `rtc.ingress.enabled`                          | Enable RTC ingress                                              | `false`                             |
+| `rtc.ingress.class`                            | Ingress class; falls back to `ingress.class`                    | `""`                                |
+| `rtc.ingress.annotations`                      | Extra ingress annotations (applied last)                        | `{}`                                |
+| `rtc.ingress.tls`                              | Enable TLS                                                      | `false`                             |
+| `rtc.ingress.tlsSecretName`                    | TLS secret name (defaults to `<release-name>-rtc-tls`)          | `""`                                |
+| `rtc.gateway.enabled`                          | Enable the RTC HTTPRoute                                        | `false`                             |
+| `rtc.gateway.parentRefs`                       | Gateways the RTC route attaches to                              | `[]`                                |
+| `rtc.gateway.annotations`                      | Annotations for the RTC HTTPRoute                               | `{}`                                |
 
 `rtc.livekit.config.port` is the one port the chart builds four objects from: the LiveKit container
 port, the `http` port of the LiveKit Service, and the backend port of both the RTC Ingress and the
@@ -890,19 +892,23 @@ helm install matrix tuwunel/tuwunel \
 ### Troubleshooting
 
 1. **Check pods are running:**
+
    ```bash
    kubectl get pods -l app.kubernetes.io/name=tuwunel
    ```
 
 2. **Check the LiveKit Service:**
+
    ```bash
    kubectl get svc -l app.kubernetes.io/component=rtc-livekit
    ```
 
 3. **Check that the homeserver advertises a transport:**
+
    ```bash
    curl https://yourdomain.com/_matrix/client/unstable/org.matrix.msc4143/rtc/transports
    ```
+
    An empty `rtc_transports` list means `livekit_url` is missing from the rendered `config.toml`,
    not that LiveKit is down.
 

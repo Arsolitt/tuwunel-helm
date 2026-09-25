@@ -53,7 +53,7 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  replicas: {{- .Values.replicas }}
+  replicas: {{ .Values.replicas }}
   serviceName: {{ template "tuwunel.fullname" . }}
   podManagementPolicy: Parallel
   selector:

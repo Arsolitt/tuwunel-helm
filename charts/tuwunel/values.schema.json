@@ -564,6 +564,11 @@
         "minLength": 1
       }
     },
+    "replicas": {
+      "description": "Number of tuwunel replicas.",
+      "type": "integer",
+      "minimum": 1
+    },
     "extraLabels": {
       "$ref": "#/definitions/stringMap"
     },
