@@ -542,6 +542,11 @@ jobs:
       # `.cr-index/index.yaml` and does not create the directory (the action's
       # own script did), so a missing `.cr-index` fails after the release is
       # already published.
+      #
+      # `cr` looks the release up *by tag*, and the tag it looks for is the
+      # release-name template it is given: its default is `<chart name>-<version>`
+      # (`tuwunel-<version>`), which is not the tag this repository pushes. The
+      # template therefore names the prefix the same way `hack/release.sh` does.
       - name: Publish the chart repository index
         env:
           CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -550,7 +555,9 @@ jobs:
           owner="${GITHUB_REPOSITORY%%/*}"
           repo="${GITHUB_REPOSITORY#*/}"
           mkdir -p .cr-index
-          cr index -o "$owner" -r "$repo" --push
+          cr index -o "$owner" -r "$repo" \
+            --release-name-template 'release-{{ .Version }}' \
+            --push
 
       # The tag is the source of truth, so the branch records the release after
       # the fact: a commit whose only change is the version line. A push made

@@ -86,7 +86,7 @@ helm package charts/tuwunel
   `hack/release-notes.sh "$VERSION" "$SECTION"`, the package is the uploaded asset, and the track is
   the flag - `--prerelease --latest=false` for a candidate, `--latest` for a stable release (a
   pre-release has to be born one: `cr` cannot create it, and an unflagged candidate is one consumers
-  see as stable). Then `cr index --push` rewrites `index.yaml` on `gh-pages`; the pinned `cr` comes
+  see as stable). Then `cr index` - given `--release-name-template 'release-{{ .Version }}'`, because that template is the tag it looks the release up by - `--push` rewrites `index.yaml` on `gh-pages`; the pinned `cr` comes
   from `chart-releaser-action@v1.7.0` with `install_only: true`, because the action's own release
   path packages "charts changed since the previous tag" and its script dies on an unbound variable
   when packaging is skipped (fixed on its `main`, unreleased). Finally it commits
