@@ -81,13 +81,15 @@ helm package charts/tuwunel
 - `release` - a `push` of a `tuwunel-*` tag only, `needs: [release-tag, lint, schema, runtime]`,
   `concurrency: chart-release`. It packages the tagged tree itself with `helm package --version`
   (the tag carries the version; the tree still records the previous release), reads the package back
-  to prove its `Chart.yaml` carries that version, and runs the pinned `cr` directly - `cr upload
-  --skip-existing` attaches the release to the existing tag and `cr index --push` rewrites
-  `index.yaml` on `gh-pages`, with `--make-release-latest=false` on the candidate track.
-  `chart-releaser-action@v1.7.0` is used with `install_only: true` for the binary alone: its own
-  script dies on an unbound variable when packaging is skipped (fixed on its `main`, unreleased).
-  It then sets the release body with `hack/release-notes.sh "$VERSION" "$SECTION"` (`--prerelease` for
-  a candidate, which reuses the section of the version it is a candidate of) and commits
+  to prove its `Chart.yaml` carries that version, then creates the GitHub release with
+  `gh release create`: the body is the `## [<version>]` section from
+  `hack/release-notes.sh "$VERSION" "$SECTION"`, the package is the uploaded asset, and the track is
+  the flag - `--prerelease --latest=false` for a candidate, `--latest` for a stable release (a
+  pre-release has to be born one: `cr` cannot create it, and an unflagged candidate is one consumers
+  see as stable). Then `cr index --push` rewrites `index.yaml` on `gh-pages`; the pinned `cr` comes
+  from `chart-releaser-action@v1.7.0` with `install_only: true`, because the action's own release
+  path packages "charts changed since the previous tag" and its script dies on an unbound variable
+  when packaging is skipped (fixed on its `main`, unreleased). Finally it commits
   `chore(release): record <tag> [skip ci]` to `main`, recording the released `version`. Nothing is
   published without a tag push: a merge publishes nothing.
 

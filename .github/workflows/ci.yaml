@@ -488,52 +488,27 @@ jobs:
           fi
           echo "::notice::packaged $(basename "$package") from the tag"
 
-      # The action installs the pinned `cr` binary only. Its own release path is
-      # unusable here: the packaging branch is exactly what this job replaces
-      # (it publishes "charts changed since the previous tag", which is not the
-      # contract), and with `skip_packaging` its script dies on an unbound
-      # variable - `cr.sh` writes `chart_version=${latest_tag}` outside the
-      # branch that sets `latest_tag`, and `set -o nounset` turns that into a
-      # failure *after* the upload and the index push have already succeeded
-      # (fixed on the action's main, unreleased as of v1.7.0). The job would go
-      # red with the release published and the notes and the version record
-      # skipped, so the two commands run here instead.
+      # The action installs the pinned `cr` binary only: its own release path
+      # cannot be used here. It packages "charts changed since the previous
+      # tag", which is not the contract, and with packaging skipped its script
+      # dies on an unbound variable (`cr.sh` writes `chart_version=${latest_tag}`
+      # outside the branch that sets it, under `set -o nounset`) after the
+      # upload has already succeeded - fixed on the action's `main`, unreleased
+      # as of v1.7.0. `cr index` is what is needed from the binary.
       - name: Install chart-releaser
         uses: helm/chart-releaser-action@v1.7.0
         with:
           version: ${{ env.CHART_RELEASER_VERSION }}
           install_only: true
 
-      # `cr upload` attaches the release to the `<chart>-<version>` tag that
-      # already exists, from the package this job built; `cr index` rewrites
-      # `index.yaml` on gh-pages. `--skip-existing` makes a re-run after a
-      # failed step idempotent, and a candidate must never take the "Latest"
-      # badge. Both read the token from `CR_TOKEN`, like the action does.
-      - name: Publish the release and the chart repository index
-        env:
-          CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CHANNEL: ${{ needs.release-tag.outputs.channel }}
-        run: |
-          set -euo pipefail
-          owner="${GITHUB_REPOSITORY%%/*}"
-          repo="${GITHUB_REPOSITORY#*/}"
-          args=(-o "$owner" -r "$repo" -c "$(git rev-parse HEAD)" --skip-existing)
-          if [ "$CHANNEL" != "stable" ]; then
-            args+=(--make-release-latest=false)
-          fi
-          cr upload "${args[@]}"
-          # `cr index` keeps its local copy of the index at
-          # `.cr-index/index.yaml` and writes it with no parent-directory
-          # creation (the action's own script makes the directory first), so a
-          # missing `.cr-index` fails the step after the release was uploaded.
-          mkdir -p .cr-index
-          cr index -o "$owner" -r "$repo" --push
-
-      # The body is the repository's own text: the `## [<version>]` section of
-      # CHANGELOG.md at the tag (a candidate uses the section of the version it
-      # is a candidate of) plus a compare link. `release-tag` already proved the
-      # section exists; the script runs again because this step needs the text.
-      - name: Publish the release notes
+      # The release is created here rather than by `cr upload`, because `cr`
+      # cannot create a pre-release (chart-releaser v1.8.1 has no such flag) and
+      # a candidate that exists unflagged - even for the seconds between two
+      # steps - is a release consumers see as stable, which is exactly what a
+      # run that died after the upload used to leave behind. The flag and the
+      # body are part of the create call, and a re-run after a failed step finds
+      # the release and updates it instead, so the step is idempotent.
+      - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-tag.outputs.tag }}
@@ -545,12 +520,37 @@ jobs:
           notes=$(mktemp)
           trap 'rm -f "$notes"' EXIT
           hack/release-notes.sh "$VERSION" "$SECTION" > "$notes"
-          args=(--notes-file "$notes")
+          chart_name=$(awk '/^name:/ { print $2; exit }' "$CHART_DIR/Chart.yaml")
+          package=".cr-release-packages/${chart_name}-${VERSION}.tgz"
+          args=(--title "$TAG" --notes-file "$notes")
           if [ "$CHANNEL" = "rc" ]; then
-            args+=(--prerelease)
+            args+=(--prerelease --latest=false)
+          else
+            args+=(--latest)
           fi
-          gh release edit "$TAG" "${args[@]}"
-          echo "::notice::$TAG body published from CHANGELOG.md ($CHANNEL track)"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release edit "$TAG" "${args[@]}"
+          else
+            gh release create "$TAG" --verify-tag "${args[@]}"
+          fi
+          gh release upload "$TAG" "$package" --clobber
+          echo "::notice::$TAG published from the ${CHANNEL} track with the CHANGELOG.md body"
+
+      # `cr index` reads the release and its asset back out of GitHub and
+      # rewrites `index.yaml` on gh-pages; the package it indexes is the one
+      # this job built. It keeps its local copy of the index at
+      # `.cr-index/index.yaml` and does not create the directory (the action's
+      # own script did), so a missing `.cr-index` fails after the release is
+      # already published.
+      - name: Publish the chart repository index
+        env:
+          CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY%%/*}"
+          repo="${GITHUB_REPOSITORY#*/}"
+          mkdir -p .cr-index
+          cr index -o "$owner" -r "$repo" --push
 
       # The tag is the source of truth, so the branch records the release after
       # the fact: a commit whose only change is the version line. A push made
