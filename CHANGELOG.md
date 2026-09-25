@@ -13,6 +13,34 @@ of the version; its heading date is the day the section was opened.
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.1.0] - 2026-09-25
+
+### Added
+
+- **There is a pre-release channel.** A candidate is published from a `release-<version>-rc.<n>` tag
+  as an ordinary Helm pre-release: an unqualified `helm install` keeps resolving the newest stable,
+  and the candidate is reached with `helm search repo tuwunel/tuwunel --versions --devel` and
+  `helm install … --version 2.1.0-rc.1`. A candidate reuses the changelog section of the version it is
+  a candidate of and never takes the repository's "Latest" badge.
+
+### Changed
+
+- **The default image is tuwunel v1.9.3** (was v1.9.2), and `appVersion` follows it. v1.9.3 fixes
+  Sliding Sync for a database whose join records were written before tuwunel 1.4.3.1 - such a user got
+  a 500 on every Sliding Sync request, logged as `u64 buffer underflow`, and clients restarted in a
+  loop - keeps OIDC sessions imported from a Conduit-lineage fork from logging their users out on the
+  first request, and makes the Synapse-compatible admin join (`POST
+  /_synapse/admin/v1/join/{room_id_or_alias}`) invite into a private room instead of answering 403. No
+  configuration key changed; pin `image.tag` to stay on v1.9.2 - the chart's contract needs v1.9.0 or
+  newer either way. The CI runtime gate starts both images on every change: the default for every
+  fixture, the pinned v1.9.2 of `ci/overrides-values.yaml`.
+- **A release is a pushed tag.** Nothing in the tree is bumped by hand any more: a
+  `release-<version>` tag carries the version, the release job stamps it into the package and records
+  it in `Chart.yaml` on `main` afterwards, and a merge publishes nothing until a tag is cut.
+- Docs: [Development and releases](./docs/development.md) documents the tag contract, the jobs that
+  enforce it and how a failure is recovered, [Upgrading](./docs/upgrade.md) how a version reaches the
+  chart repository and how a candidate is opted into, and the README the steps that cut a release.
+
 ## [2.0.2] - 2026-09-25
 
 ### Fixed
