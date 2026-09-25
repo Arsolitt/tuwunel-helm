@@ -161,21 +161,38 @@ The chart's environment, probe and configuration contract targets tuwunel v1.9.0
 
 ## Releasing New Chart Versions
 
-Releases are automated by [`.github/workflows/ci.yaml`](./.github/workflows/ci.yaml):
+Releases are automated by [`.github/workflows/ci.yaml`](./.github/workflows/ci.yaml), and a release
+exists only because a tag was pushed. Both tracks are cut from `main` and the tag is created by
+[`hack/release.sh`](./hack/release.sh) - a chart version is never bumped by hand:
 
-1. Bump `version` in [`charts/tuwunel/Chart.yaml`](charts/tuwunel/Chart.yaml) and add the matching
-   `## [<version>] - <date>` section to [`CHANGELOG.md`](./CHANGELOG.md) in the same commit, then
-   merge to `main`.
-2. `chart-releaser` packages the chart, creates the `tuwunel-<version>` tag and
-   GitHub release, and updates the `index.yaml` served from the `gh-pages` branch.
-3. The `release` job copies that changelog section into the GitHub release body (followed by a
-   compare link to the previous tag). A released version with no such section fails the job, so a
-   release body can never silently stay the chart `description`.
-4. `helm repo update` on a consumer then picks the new version up.
+| Track | Tag | GitHub release |
+| --- | --- | --- |
+| stable | `tuwunel-2.1.0` | normal, takes "Latest" |
+| release candidate | `tuwunel-2.1.0-rc.1` | pre-release, never "Latest" |
 
-A merge that does not change the chart version publishes nothing, so documentation
-and CI changes are safe. Only stable versions are published - there is no
-pre-release channel.
+1. Write the section the release body comes from: `## [<version>]` in
+   [`CHANGELOG.md`](./CHANGELOG.md). A candidate reuses the section of the version it is a candidate
+   of, so `2.1.0-rc.1` publishes `## [2.1.0]`.
+2. Cut the tag with `hack/release.sh <version>` (for example `hack/release.sh 2.1.0-rc.1`). It refuses
+   a version of any other shape, a missing CHANGELOG section, a dirty working tree, a `HEAD` that is
+   not the tip of `origin/main`, and a tag that exists locally or on `origin`;
+   `hack/release.sh --check <version>` validates without pushing.
+3. Pushing the tag starts the pipeline: `release-tag` resolves the version, the channel and the
+   section and refuses a tag that is not an ancestor of `origin/main`; `lint`, `schema` and `runtime`
+   gate the release; and the `release` job publishes the GitHub release, the `.tgz` and the
+   `index.yaml` entry served from the `gh-pages` branch. The chart version is stamped from the tag
+   (`helm package --version`), and the release body is the CHANGELOG section, followed by a compare
+   link.
+4. The job then records the released version in
+   [`charts/tuwunel/Chart.yaml`](charts/tuwunel/Chart.yaml) on `main`, in a
+   `chore(release): record <tag> [skip ci]` commit - the tag is the source of truth and the branch
+   follows it.
+5. Consumers pick the version up with `helm repo update`. A candidate is opt-in: it stays invisible to
+   an unqualified `helm install` and is reached with
+   `helm search repo tuwunel/tuwunel --versions --devel` and `helm install … --version 2.1.0-rc.1`.
+
+Nothing else is a release: a merge publishes nothing, so documentation, CI and even a chart change
+are safe until a tag is pushed.
 
 Every pull request runs `lint` (Helm 4 pinned, `helm lint --strict` for the chart defaults and every
 scenario values file, then `helm template` + `kubeconform -strict` for the defaults and every

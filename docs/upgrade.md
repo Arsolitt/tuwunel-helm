@@ -32,9 +32,9 @@ configures and probes the server through exactly those two things. An older imag
 starts, but it ignores the chart-managed environment variables and cannot answer the exec probe, so
 the pod never becomes Ready. Nothing in `helm lint`, a schema check or a manifest diff catches this.
 
-A packaged version comes from the chart repository, which chart-releaser rewrites on every merge to
-`main`: it packages `charts/tuwunel`, creates the `tuwunel-<version>` tag, and updates the `index.yaml`
-served from the `gh-pages` branch.
+A packaged version comes from the chart repository, which the release job rewrites on every release:
+it packages `charts/tuwunel` at the version the tag names and updates the `index.yaml` served from the
+`gh-pages` branch.
 
 ```console
 $ helm repo add tuwunel https://arsolitt.github.io/tuwunel-helm
@@ -86,12 +86,12 @@ that the rest of this page deals with.
    section (shipped in the package, readable with `helm show readme` as shown above) plus the release
    body. The repository changelog is [`../CHANGELOG.md`](../CHANGELOG.md).
 3. **Check that the released version has a `## [<version>]` section in `CHANGELOG.md`.** The `release`
-   job copies that section into the GitHub release body, so a release without one means the release
-   notes are missing even though the chart is published — and the job itself goes red after
-   publication. The match is literal: `## [<version>]` must be followed by a space or the end of the
-   line, so `## [2.0.0]-x` is invisible to the extractor while a `## [1.2.0-rc1]` heading above
-   `## [1.2.0]` is not mistaken for it. If you are the maintainer, add the section in the same commit
-   as the version bump.
+   job takes that section as the GitHub release body, and the release is refused *before* it is
+   published when the section is missing: `hack/release.sh` will not cut the tag, and the
+   `release-tag` job fails the run. The match is literal: `## [<version>]` must be followed by a space
+   or the end of the line, so `## [2.0.0]-x` is invisible to the extractor while a `## [1.2.0-rc1]`
+   heading above `## [1.2.0]` is not mistaken for it. If you are the maintainer, write the section
+   before cutting the tag; a candidate publishes the section of the version it is a candidate of.
 4. **Render your values against the target chart, client-side.** `values.schema.json` runs on every
    `helm lint`, `helm template` and install:
 
@@ -371,33 +371,31 @@ forward operation driven through the release's `args`
 
 ## Changes that publish nothing
 
-Only a `Chart.yaml` version bump creates a release. `chart-releaser` runs with `skip_existing: true`,
-so a merge that leaves `version` alone publishes nothing — documentation, CI, and even a template fix
-that shipped without a bump. The workflow summary says so in as many words:
+Only a pushed tag publishes. The release jobs run on a `tuwunel-*` tag and nowhere else (`release-tag`
+resolves it, `lint`, `schema` and `runtime` gate it, then `release` publishes), so a merge publishes
+nothing - documentation, CI, and even a chart change - until a tag is cut with
+`hack/release.sh <version>`. There is no unreleased version for the pipeline to find and no `version`
+in `Chart.yaml` to bump: the tag names the version. Check what the repository actually serves before
+assuming an upgrade is available:
 
-```text
-No chart version change detected - nothing was published.
-Bump `version` in `charts/tuwunel/Chart.yaml` to publish a release.
+```console
+$ helm repo update
+$ helm search repo tuwunel/tuwunel -l
 ```
 
-What that means while you wait for a fix:
+A release candidate is invisible to that command, and that is deliberate: it is an ordinary Helm
+pre-release, so an unqualified `helm install` keeps resolving the newest stable. Opt in explicitly:
 
-- The `release` job only runs on a push to `main`, and only after `lint`, `schema` and `runtime` pass.
-  A pull request publishes nothing regardless of what it changes.
-- Only stable versions are published; there is no pre-release channel, so nothing in the index needs
-  `--devel` to become visible.
-- A merged fix with no version bump produces no tag and no index entry. Check what the repository
-  actually serves before assuming an upgrade is available:
+```console
+$ helm search repo tuwunel/tuwunel --versions --devel
+$ helm install my-release tuwunel/tuwunel --version 2.1.0-rc.1
+```
 
-  ```console
-  $ helm repo update
-  $ helm search repo tuwunel/tuwunel -l
-  ```
-
-> **Note:** Publication and release notes are two steps: chart-releaser creates the tag, the GitHub
-> release and the index entry first, and the notes step runs afterwards. A released version with no
-> `## [<version>]` section in [`../CHANGELOG.md`](../CHANGELOG.md) therefore fails the job *after* the
-> chart is already published, leaving a release whose body is still the chart description.
+> **Note:** The CHANGELOG section is checked before the release is created, not after: `hack/release.sh`
+> refuses to cut a tag whose `## [<version>]` section is missing, and the `release-tag` job checks the
+> same rule again before the gates, so a version with no section fails without publishing anything.
+> The release body is that section - a candidate publishes the section of the version it is a candidate
+> of, so `2.1.0-rc.1` publishes `## [2.1.0]`.
 
 See [Development and releases](./development.md) for the pipeline itself, and
 [Day-2 operations](./operations.md) for the ongoing checks after the upgrade settles.

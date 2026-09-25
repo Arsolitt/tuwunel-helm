@@ -1,6 +1,6 @@
 # Development and releases
 
-> Repository layout, the fixture contract, the local command set and the CI jobs behind this chart, and how a `Chart.yaml` bump becomes a published release.
+> Repository layout, the fixture contract, the local command set and the CI jobs behind this chart, and how a release tag becomes a published release.
 
 ## Table of Contents
 
@@ -22,7 +22,7 @@ This is a single-chart repository: `charts/tuwunel` is the only chart, and `.git
 ```text
 tuwunel-helm/
 ├── .github/
-│   ├── workflows/ci.yaml          # the only pipeline: jobs lint, schema, runtime, release
+│   ├── workflows/ci.yaml          # the only pipeline: jobs lint, schema, runtime, release-tag, release
 │   ├── ISSUE_TEMPLATE/            # bug_report.yml, feature_request.yml, config.yml
 │   ├── CODEOWNERS                 # `* @Arsolitt`
 │   ├── dependabot.yml             # weekly, grouped GitHub Actions updates
@@ -48,6 +48,7 @@ tuwunel-helm/
 ├── hack/
 │   ├── runtime-check.sh           # the runtime gate - the `runtime` job just calls it
 │   ├── selector-check.py          # the selector gate - the `lint` job calls it per render
+│   ├── release.sh                 # cuts a release tag; `--check` is what the `release-tag` job runs
 │   └── release-notes.sh           # prints a CHANGELOG section as the GitHub release body
 ├── AGENTS.md                      # conventions: style, fixture rules, CI/release rules
 ├── CHANGELOG.md                   # Keep a Changelog; a released version's section is its release body
@@ -55,7 +56,7 @@ tuwunel-helm/
 └── README.md                      # landing page, install instructions, the release flow
 ```
 
-There is no test framework. `find . -name '*test*'` returns only `charts/tuwunel/templates/tests/test-connection.yaml` (the `helm test` hook), and `hack/` holds exactly three scripts. Local build artifacts are gitignored: `.tmp`, `output`, `*.tgz`, `.cr-release-packages/`, `.cr-index/`.
+There is no test framework. `find . -name '*test*'` returns only `charts/tuwunel/templates/tests/test-connection.yaml` (the `helm test` hook), and `hack/` holds exactly four scripts. Local build artifacts are gitignored: `.tmp`, `output`, `*.tgz`, `.cr-release-packages/`, `.cr-index/`.
 
 ## Fixture categories
 
@@ -206,14 +207,15 @@ $ helm package charts/tuwunel
 
 ## The CI jobs
 
-`.github/workflows/ci.yaml` is the only pipeline. It runs on every `pull_request` and on `push` to `main`; job ids double as status-check contexts, and the first three are meant to be required on pull requests.
+`.github/workflows/ci.yaml` is the only pipeline. It runs on every `pull_request`, on `push` to `main` and on a push of a `tuwunel-*` tag; job ids double as status-check contexts, and the first three are meant to be required on pull requests.
 
 | Job | Name | Runs | Protects against |
 |---|---|---|---|
 | `lint` | Lint and validate manifests | `helm lint --strict` for the defaults and every scenario; `helm template` + `kubeconform -strict` for the **default values** and every scenario, on each version in `KUBERNETES_VERSIONS`; three assertions on the renders themselves - `Service types render an applyable clusterIP` (the headless default is kept, a LoadBalancer renders no `clusterIP`) and `Rendered host lists carry no empty entries` (every `spec.tls[].hosts[]`, `spec.rules[].host` and route `spec.hostnames[]` has to be a host the API server accepts - an RFC 1123 subdomain, optionally `*.`-prefixed - so an empty entry, a port or a scheme in any rendered host fails the step; it runs over the default values and every scenario); and `Selectors are immutable and select their own pods` (no `spec.selector.matchLabels` and no Service `selector` may carry `helm.sh/chart`, `app.kubernetes.io/version` or `app.kubernetes.io/managed-by`, and every workload's own pod template has to carry the pairs its selector asks for - a selector that moves with the chart version renders fine and is only discovered by the *next* chart release, which is what happened up to 2.0.1) | a scenario that stops rendering, a manifest that violates the Kubernetes or Gateway API schemas, and the three combinations no schema can see: `clusterIP: "None"` is legal on a ClusterIP Service only, kubeconform's Ingress schema accepts an empty host that the API server refuses, and a selector that moves with the chart version only fails on the *next* chart release |
 | `schema` | Value schema guardrails | every `ci/invalid/*.yaml` must be refused by the schema; every `ci/invalid-render/*.yaml` must be refused by a template and name its value; every scenario must still render | a weakened `values.schema.json` or a dropped template guard |
 | `runtime` | Runtime smoke test against the real image | checkout, the pinned Helm, then `hack/runtime-check.sh "$CHART_DIR"` (`timeout-minutes: 25`) | a config value of the wrong TOML type and a readiness path that answers non-200 - neither is visible to the shape-only jobs; for a schedule that can fire inside the wait window it also starts the rendered backup sidecar, so a sidecar whose job `crond` cannot start fails here |
-| `release` | Release chart | chart-releaser, then `gh release edit` with the CHANGELOG section | an unpublished version bump and a release body that stayed the chart description |
+| `release-tag` | Resolve the release tag | a `tuwunel-*` tag push only; `hack/release.sh --check "$GITHUB_REF_NAME"` resolves `version`, `channel`, `section` and `tag` (the same script that cuts the tag, so the rules cannot drift), then the job refuses a tag that is not an ancestor of `origin/main` | a version that is neither `<major>.<minor>.<patch>` nor `<major>.<minor>.<patch>-rc.<n>`, a missing `## [<version>]` CHANGELOG section, and a tag not cut from `main` - each fails in seconds, before the ~25-minute `runtime` gate |
+| `release` | Release chart | a `tuwunel-*` tag push only, `needs: [release-tag, lint, schema, runtime]`, `concurrency: chart-release`; packages the tagged tree with `helm package --version` (stamping the tag's version, then reading it back out of the `.tgz`), runs chart-releaser with `skip_packaging: true` / `skip_existing: true` and `mark_as_latest` on the stable track only, sets the body with `hack/release-notes.sh <version> [<section-version>]` (`--prerelease` for a candidate), then commits the released `version` to `main` as `chore(release): record <tag> [skip ci]` | a package that does not carry the released version, a release body that stayed the chart description, and a release recorded nowhere on the branch |
 
 Tool pins live in the workflow `env:` block - one pin per tool, no `@latest` anywhere; Dependabot only bumps the actions.
 
@@ -233,7 +235,7 @@ Tool pins live in the workflow `env:` block - one pin per tool, no `@latest` any
 
 Bumping `KUBECONFORM_VERSION` or `CRDS_CATALOG_SHA` without updating the matching checksum fails the job at `sha256sum -c`; those pins travel together.
 
-The `release` job is gated three ways: `if: github.event_name == 'push' && github.ref == 'refs/heads/main'`, `needs: [lint, schema, runtime]`, and `permissions: contents: write` (the workflow default is `contents: read`). Concurrency is one run per workflow and ref, cancelling in progress only for pull requests.
+The `release` job is gated four ways: it runs only on a tag push (`if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')`), `needs: [release-tag, lint, schema, runtime]`, `permissions: contents: write` (the workflow default is `contents: read`), and `concurrency: chart-release`, which serialises releases across refs - two tags pushed close together would otherwise race on the same branch. The workflow keeps its own group (`${{ github.workflow }}-${{ github.ref }}`, cancelling in progress only for pull requests).
 
 > **Note:** There is deliberately no `paths:` filter on `pull_request`. A job skipped by a path filter never reports a status, so requiring it would block every merge that does not touch those paths - which is also why a docs-only pull request still runs all three quality jobs.
 
@@ -281,36 +283,52 @@ Every scenario gets a unique container name and scratch directory derived from `
 
 ## Releasing
 
-Only a `Chart.yaml` version bump publishes anything.
+A release is a tag push. Both tracks are cut from `main`, and nothing in the tree is bumped by hand:
+the tag carries the version, the release job stamps it into the package, and the branch records it
+afterwards.
 
-1. Bump `version` in `charts/tuwunel/Chart.yaml` and add the matching `## [<version>] - <date>` section to `CHANGELOG.md` **in the same commit**.
-2. Merge to `main`. The `release` job runs only there, and only after `lint`, `schema` and `runtime` pass.
-3. chart-releaser packages the chart, creates the `tuwunel-<version>` tag and the GitHub release, and updates `index.yaml` on the `gh-pages` branch (which holds `.nojekyll` and `index.yaml` only). `skip_existing: true` means an already-released version is skipped.
-4. The next step replaces the release body: it reads `name` and `version` back from each chart in the action's `changed_charts` output, builds `tag=<name>-<version>`, runs `hack/release-notes.sh "$version"` and applies the result with `gh release edit "$tag" --notes-file`.
-5. Consumers pick the version up with `helm repo update`.
+| | stable track | release candidate track |
+|---|---|---|
+| version shape | `<major>.<minor>.<patch>` | `<major>.<minor>.<patch>-rc.<n>` |
+| tag | `tuwunel-2.1.0` | `tuwunel-2.1.0-rc.1` |
+| CHANGELOG section | `## [2.1.0]` | `## [2.1.0]` - the version it is a candidate of |
+| GitHub release | normal, "Latest" | `--prerelease`, never "Latest" |
 
-The notes step exists because chart-releaser cannot carry release notes: `chart-releaser-action@v1.7.0` has no notes input, and `cr upload` reads a notes file only from inside the packaged chart. The action's own `chart_version` output is not usable either - it is the *previous* tag from `git describe --tags --abbrev=0 HEAD~`, which is why the released version is read back from `Chart.yaml`.
+1. Write the section the release body comes from: `## [<version>]` in `CHANGELOG.md`, once per version and before the first tag of it. A candidate reuses the section of the version it is a candidate of, so `2.1.0-rc.1` publishes `## [2.1.0]`; the heading date is the day the section was opened.
+2. Cut the tag with `hack/release.sh <version>` - the only thing that creates one. It refuses a version that is neither shape, a missing CHANGELOG section (it runs `hack/release-notes.sh` as the check), a dirty working tree, a `HEAD` that is not the tip of `origin/main`, and a tag that already exists locally or on `origin`. `hack/release.sh --check <version>` validates only, printing the `version`, `channel`, `section` and `tag` it resolved.
+3. Pushing the tag starts the run. `release-tag` resolves it through the same script and refuses a tag that is not an ancestor of `origin/main`; `lint`, `schema` and `runtime` gate the release.
+4. The `release` job packages the tagged tree with `helm package --version` - the tag carries the version, and the tree still records the *previous* release because the recording commit lands only afterwards - then reads the package back to prove its `Chart.yaml` carries that version, and runs chart-releaser with `skip_packaging: true` / `skip_existing: true` and `mark_as_latest` only on the stable track. That attaches the GitHub release to the tag that already exists and rewrites `index.yaml` on the `gh-pages` branch (which holds `.nojekyll` and `index.yaml` only); `skip_existing: true` makes a re-run after a failed step idempotent.
+5. The body is set next, from the repository's own text: `hack/release-notes.sh "$VERSION" "$SECTION"` piped into `gh release edit "$TAG" --notes-file`, with `--prerelease` for a candidate. `concurrency: chart-release` serialises releases, and `main` never moves backwards - a release cut from an older commit publishes and leaves the branch alone.
+6. The last step commits the released version to `main` as `chore(release): record <tag> [skip ci]`, writing `version` into `charts/tuwunel/Chart.yaml`. A push made with `GITHUB_TOKEN` starts no run by itself, and `[skip ci]` keeps the commit out of a pipeline if that ever changes.
+7. Consumers pick the version up with `helm repo update`. A candidate is opt-in: an unqualified `helm install` keeps resolving the newest stable, and the candidate needs `helm search repo tuwunel/tuwunel --versions --devel` / `helm install … --version 2.1.0-rc.1`.
 
-`hack/release-notes.sh <version>` prints the `## [<version>]` section of `CHANGELOG.md`, from the heading up to (excluding) the next `## ` heading, plus a best-effort `**Full Changelog**: https://github.com/<repo>/compare/<previous-tag>...<tag>` line when the repository, the `<chart>-<version>` tag and a previous `<chart>-*` tag are all resolvable.
+The release body is not the action's: `chart-releaser-action@v1.7.0` has no notes input, and `cr upload` reads a notes file only from inside the packaged chart, so the job runs `hack/release-notes.sh` and applies the result with `gh release edit`. The version is never read out of the checkout either - `release-tag` resolves it from the tag, and the packaging step stamps it into the package.
+
+`hack/release-notes.sh <version> [<section-version>]` prints the `## [<section-version>]` section of `CHANGELOG.md` (the second argument defaults to the first), from the heading up to (excluding) the next `## ` heading, plus a best-effort `**Full Changelog**: https://github.com/<repo>/compare/<previous-tag>...<tag>` line when the repository, the `<chart>-<version>` tag and a previous `<chart>-*` tag are all resolvable. The previous tag is track-aware: a candidate compares against whatever preceded it, a stable release against the previous *stable* one, so a stable body is the whole section rather than what changed since the last candidate. `hack/release.sh` runs the same script as its section check, so the rule that gates the tag is the rule the release job applies.
 
 | Invocation | Result |
 |---|---|
-| `hack/release-notes.sh 2.0.0` | exit 0, the section plus the compare link on stdout |
+| `hack/release-notes.sh 2.0.0` | exit 0, the section plus the compare link on stdout - one argument means the section version is the released version |
+| `hack/release-notes.sh 2.1.0-rc.1 2.1.0` | exit 0, the `## [2.1.0]` section - the form a candidate is published with, once that section exists |
 | `hack/release-notes.sh 9.9.9` | exit 1, nothing on stdout, `no '## [9.9.9]' section in <...>/CHANGELOG.md: add it before releasing 9.9.9, the GitHub release body is taken from it` |
-| `hack/release-notes.sh` (no argument) | exit 2, `usage: hack/release-notes.sh <version>   (e.g. 2.0.0)` |
+| `hack/release-notes.sh 2.1.0-rc.1 9.9.9` | exit 1, nothing on stdout, the same message naming `## [9.9.9]` as the missing section and `2.1.0-rc.1` as the version being released |
+| `hack/release-notes.sh` (no argument) | exit 2, `usage: hack/release-notes.sh <version> [<section-version>]   (e.g. 2.0.0, or 2.1.0-rc.1 2.1.0 for a candidate)` |
 | `CHANGELOG_FILE=<path> hack/release-notes.sh <version>` | reads that file instead of the repository changelog (the documented test hook); a missing file exits 1 with `no changelog file <path>: it holds the release body for <version>` |
 
-The heading match is a literal prefix and requires a space or the end of the line after the closing bracket, so looking for `1.2.0` cannot pick up a `## [1.2.0-rc1]` heading above it. A heading written as `## [2.0.0]-something` matches nothing and fails the release job.
+The heading match is a literal prefix and requires a space or the end of the line after the closing bracket, so looking for `1.2.0` cannot pick up a `## [1.2.0-rc1]` heading above it. A heading written as `## [2.0.0]-something` matches nothing, so `hack/release.sh` refuses to create the tag and `release-tag` refuses it again in CI - a version whose section is missing cannot be published at all.
 
 | Failure mode | What happens |
 |---|---|
-| No `## [<version>]` section for the released version | `hack/release-notes.sh` exits 1, and the release job fails - after chart-releaser has already created the tag, the GitHub release and the `index.yaml` entry; the release body stays the chart `description` |
-| `version` unchanged in the merge | nothing is published; the job summary prints `No chart version change detected - nothing was published.` and `Bump \`version\` in \`charts/tuwunel/Chart.yaml\` to publish a release.` |
-| A merge that only touches docs or CI | same as above - safe, nothing is published |
-| A pre-release | not supported: only stable `version` values are published, there is no pre-release channel |
+| No `## [<version>]` section for the tagged version | `hack/release.sh` refuses to cut the tag, and `release-tag` refuses the tag again in CI: the run fails before the gates and before anything is published - not after the release exists |
+| A version of any other shape (`9.9`, `9.9.9-rc`, `9.9.9-rc.1.2`, `foo-9.9.9`) | `hack/release.sh` exits 2 without creating a tag; pushed anyway, the same check fails the run in `release-tag` |
+| A tag that is not an ancestor of `origin/main` | `release-tag` fails the run in seconds; nothing is published |
+| A merge that only touches docs, CI or even the chart | nothing is published - a release needs a tag push, and there was none |
+| A release candidate | supported: it publishes a GitHub pre-release (never "Latest") with the section of the version it is a candidate of, and consumers opt in with `--devel` / `--version` |
 | A pin and its checksum updated separately | the job fails at `sha256sum -c` before validating anything |
 
 > **Tip:** To see what is actually published, read `origin/gh-pages` (or the chart repository URL) rather than a local `gh-pages` branch - a checkout's local branch can lag the published `index.yaml`.
+
+> **Note:** The recovery depends on whether anything was published. While the release was refused - a version of the wrong shape, a missing section, a tag that is not on `main` - nothing exists on the repository yet, so the tag can be deleted and re-pushed. Once `cr upload` has run the tag must not move: recover with `gh run rerun` (the published release is skipped and the notes and the version record are retried), or, when the workflow itself is the defect, re-run the notes and the version record by hand.
 
 ## Adding or changing a value
 
@@ -353,9 +371,9 @@ If a new value renders a kind that no earlier render produced, the `lint` job fa
 | `values.yaml` style | `##` for section headers, `#` for inline comments, `enabled: false` for optional features |
 | Env vars | three patterns: plain `{{- range $key, $val := .Values.env }}`, secret form `secretName/key` via `name: {{ (split "/" $val)._0 }}`, and raw sections via `{{- with .Values.envRaw }}{{- toYaml . \| nindent 12 }}{{- end }}` |
 | Pins | Nothing uses `@latest`: the workflow `env:` block pins Helm, kubeconform (+ sha256), chart-releaser, the Kubernetes versions and the CRDs-catalog commit; Dependabot bumps the GitHub Actions only |
-| Version bump | increment `version` in `charts/tuwunel/Chart.yaml`, update `appVersion` when the application version changes, merge to `main` |
+| Version and tags | the tag carries the version: `hack/release.sh <version>` creates it, and the release job records it in `charts/tuwunel/Chart.yaml` on `main` afterwards; `appVersion` is updated in a pull request when the application version changes |
 | Documentation | the repository's prose is English - `values.yaml` comments, `charts/tuwunel/README.md`, `CHANGELOG.md`, `ci/` fixture header comments - and every fixture header explains why the fixture exists |
 
-The pull request template asks for what changed, how it was verified, and a six-item checklist: lint passes, every scenario renders, `hack/runtime-check.sh` passes, new or changed values are covered by `values.schema.json` and the chart README tables, nothing under `ci/invalid/` became acceptable to the schema, and `version` was bumped when chart contents changed. `.github/CODEOWNERS` assigns every path to one owner, and Dependabot opens weekly grouped action updates rather than touching the manual tool pins.
+The pull request template asks for what changed, how it was verified, and a six-item checklist: lint passes, every scenario renders, `hack/runtime-check.sh` passes, new or changed values are covered by `values.schema.json` and the chart README tables, nothing under `ci/invalid/` became acceptable to the schema, and `CHANGELOG.md` carries the section for the version the change ships in. `.github/CODEOWNERS` assigns every path to one owner, and Dependabot opens weekly grouped action updates rather than touching the manual tool pins.
 
 Related pages: [Upgrading](./upgrade.md) for what a published version change means to consumers, [Troubleshooting](./troubleshooting.md) for reading the render refusals and runtime failures, and [Installing the chart](./installation.md) for the consumer side of the published chart.
