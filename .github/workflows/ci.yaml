@@ -234,6 +234,32 @@ jobs:
           done
           echo "no empty hosts in any render"
 
+      # An immutable field cannot be seen in a single render: `spec.selector` of
+      # a workload accepts the chart-version label the same way it accepts any
+      # other, and only the *next* chart release discovers that the API server
+      # refuses to change it (`spec.selector: Invalid value: ...: field is
+      # immutable` - chart 2.0.1 shipped exactly that, so every upgrade of every
+      # release it created failed). The two properties that keep it applyable are
+      # checked on every render instead: a selector carries no label that moves
+      # with the chart version, and the workload's own pod template carries
+      # everything its selector asks for. Services are held to the first one as
+      # well - their selector is mutable, but a chart-version label in it drops
+      # every endpoint of the old pods the moment the new chart is applied.
+      - name: Selectors are immutable and select their own pods
+        run: |
+          set -euo pipefail
+          manifest="${RUNNER_TEMP}/tuwunel-selectors.yaml"
+          check() {
+            local label="$1"
+            shift
+            helm template ci "$CHART_DIR" "$@" > "$manifest"
+            python3 hack/selector-check.py "$manifest" "$label"
+          }
+          check "default values"
+          for values in "$CHART_DIR"/ci/*-values.yaml; do
+            check "$(basename "$values")" -f "$values"
+          done
+
   schema:
     name: Value schema guardrails
     runs-on: ubuntu-latest

@@ -53,7 +53,9 @@ helm package charts/tuwunel
   downloads the `HTTPRoute`/`UDPRoute`/`TCPRoute` JSON schemas from a pinned `datreeio/CRDs-catalog`
   commit, checksum-verifies them, passes their directory as a second `-schema-location` next to
   `default`, and fails whenever the summary is not `Skipped: 0` - a skipped resource is a kind with
-  no schema.
+  no schema. The job also carries the render assertions no schema can express: an applyable
+  `clusterIP` per Service type, host lists without empty entries, and the selector check
+  (`hack/selector-check.py`, below) over the defaults and every fixture.
 - `schema` - asserts that `charts/tuwunel/ci/invalid/*.yaml` is still rejected **by the schema**
   (not by an unrelated template error), that `charts/tuwunel/ci/invalid-render/*.yaml` is
   rejected **by a template** for the value its `# expect-error:` line names, and that every
@@ -91,8 +93,14 @@ Rules that keep this honest:
   A fixture in the wrong folder makes the job that owns it fail, not pass.
 - The chart defaults are a supported configuration, so `lint` renders and validates them next to
   the fixtures - chart-releaser publishes exactly those defaults.
-- `hack/runtime-check.sh` reads its images, env, paths and probes out of the render. If it needs
-  to know something the manifests do not say, that is a bug in the manifests.
+- `hack/runtime-check.sh` reads its images, env, paths and probes out of the render. If it needs to
+  know something the manifests do not say, that is a bug in the manifests.
+- `hack/selector-check.py` is the gate that keeps `spec.selector` applyable: no selector, on a
+  workload or on a Service, may carry `helm.sh/chart`, `app.kubernetes.io/version` or
+  `app.kubernetes.io/managed-by`, and every workload's own pod template has to carry the pairs its
+  selector asks for. The first defect is invisible in a single render - the API server only refuses
+  the *next* chart version - and chart 2.0.1 shipped it, which made every upgrade of every release
+  it created fail with `spec.selector: Invalid value: …: field is immutable`.
 - `dibi/envsubst` (the init image) is published for `linux/amd64` only; the runtime gate passes
   `--platform linux/amd64` to the init container on a non-amd64 daemon and nothing else, so a
   native amd64 runner needs no emulation. Overriding `initContainer.image` to a multi-arch or
