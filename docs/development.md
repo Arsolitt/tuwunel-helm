@@ -28,8 +28,8 @@ tuwunel-helm/
 │   ├── dependabot.yml             # weekly, grouped GitHub Actions updates
 │   └── PULL_REQUEST_TEMPLATE.md   # what changed / how it was verified / checklist
 ├── charts/tuwunel/                # the chart
-│   ├── Chart.yaml                 # name tuwunel, version 2.0.2, appVersion v1.9.2, kubeVersion '>=1.31.0-0'
-│   ├── values.yaml                # defaults (server_name: "yourdomain.com", image.tag: v1.9.2)
+│   ├── Chart.yaml                 # name tuwunel, version 2.0.2, appVersion v1.9.3, kubeVersion '>=1.31.0-0'
+│   ├── values.yaml                # defaults (server_name: "yourdomain.com", image.tag: v1.9.3)
 │   ├── values.schema.json         # applied by every helm command
 │   ├── README.md                  # canonical value reference; ships inside the packaged chart
 │   ├── .helmignore                # excludes ci/ - fixtures never ship

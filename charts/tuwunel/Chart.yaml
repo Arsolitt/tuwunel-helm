@@ -1,5 +1,5 @@
 apiVersion: v2
-appVersion: v1.9.2
+appVersion: v1.9.3
 description: Helm chart for tuwunel - a Matrix homeserver based on Conduit with optional LiveKit RTC support
 home: https://github.com/Arsolitt/tuwunel-helm
 keywords:

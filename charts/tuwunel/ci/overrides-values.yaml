@@ -4,7 +4,9 @@
 # Guards the schema against over-restriction: numeric and string CPU quantities,
 # a quoted service port, a numeric init-container tag, extra/untyped env values,
 # scheduling knobs and labels/annotations. The tag is pinned on purpose: the
-# runtime job starts this exact image, and the TUWUNEL_* contract needs >= v1.9.
+# runtime job starts this exact image, and the TUWUNEL_* contract needs >= v1.9. It
+# is kept one release behind the default on purpose: the other fixtures run the
+# default tag, so the job covers two upstream versions.
 nameOverride: tuwunel-ci
 
 server_name: matrix.ci.example

@@ -92,7 +92,7 @@ The following tables list the configurable parameters of the tuwunel chart and t
 | ---------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------- |
 | `server_name`                      | Server name (your Matrix domain)                                                            | `yourdomain.com`                   |
 | `image.repository`                 | Image repository                                                                            | `ghcr.io/matrix-construct/tuwunel` |
-| `image.tag`                        | Image tag; needs v1.9.0 or newer for the chart's env and probe contract                      | `v1.9.2`                           |
+| `image.tag`                        | Image tag; needs v1.9.0 or newer for the chart's env and probe contract                      | `v1.9.3`                           |
 | `image.pullPolicy`                 | Image pull policy                                                                           | `IfNotPresent`                     |
 | `initContainer.image.repository`   | Init container image for envsubst                                                           | `dibi/envsubst`                    |
 | `initContainer.image.tag`          | Init container image tag                                                                    | `1`                                |
@@ -993,7 +993,7 @@ ingress:
 server_name: "matrix.example.org"
 
 image:
-  tag: "v1.9.2"
+  tag: "v1.9.3"
 
 persistence:
   data:

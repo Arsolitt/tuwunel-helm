@@ -20,10 +20,10 @@
 
 `charts/tuwunel/Chart.yaml` carries three version numbers, and each one gates something different:
 
-| Field | Value in chart 2.0.2 | What it decides |
+| Field | Value | What it decides |
 | --- | --- | --- |
-| `version` | `2.0.2` | The chart release. Every release carries a `release-<version>` tag and the published index entry points at it; the releases up to 2.0.2 keep the `tuwunel-<version>` tag the tooling of the time created. |
-| `appVersion` | `v1.9.2` | Metadata only: the tuwunel release the defaults target. The image the pod runs comes from `image.tag` (default `v1.9.2`) — no template reads `appVersion`. |
+| `version` | written by the release job | The chart release. `hack/release.sh` cuts a `release-<version>` tag, the release job packages that tag and records its version here afterwards, and the published index entry points at the release; the releases up to 2.0.2 keep the `tuwunel-<version>` tag the tooling of the time created. |
+| `appVersion` | `v1.9.3` | Metadata only: the tuwunel release the defaults target. The image the pod runs comes from `image.tag` (default `v1.9.3`) — no template reads `appVersion`. |
 | `kubeVersion` | `>=1.31.0-0` | Enforced by Helm before anything is rendered. A cluster below 1.31 cannot take the chart at all. `kubeVersion` was introduced by 2.0.0. |
 
 Separate from all three is the application floor: **the chart requires tuwunel v1.9.0 or newer**.
