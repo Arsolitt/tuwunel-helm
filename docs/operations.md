@@ -141,7 +141,7 @@ The upgrade procedure itself, including chart-version migrations, is in [Upgradi
 
 The rule, from the template: a string limit is read as a CPU quantity in millicores — a trailing `m` is stripped, and a value containing `.` is `ceil`ed and multiplied by 1000 — and that millicore count is then divided by 1000, rounding up to whole threads unless it divides evenly. A non-string (plain YAML number) limit is used as the thread count literally.
 
-Measured by rendering the chart (v2.0.1) with each form:
+Measured by rendering the chart (v2.0.2) with each form:
 
 | `resources.limits.cpu` | Rendered threads | Note |
 | --- | --- | --- |

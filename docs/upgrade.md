@@ -7,6 +7,7 @@
 - [The version contract](#the-version-contract)
 - [Before you upgrade](#before-you-upgrade)
 - [Upgrading from 1.x to 2.0.0](#upgrading-from-1x-to-200)
+- [Upgrading from 2.0.1 or older](#upgrading-from-201-or-older)
 - [The database migration window](#the-database-migration-window)
 - [Upgrade procedure](#upgrade-procedure)
 - [After the upgrade](#after-the-upgrade)
@@ -19,9 +20,9 @@
 
 `charts/tuwunel/Chart.yaml` carries three version numbers, and each one gates something different:
 
-| Field | Value in chart 2.0.1 | What it decides |
+| Field | Value in chart 2.0.2 | What it decides |
 | --- | --- | --- |
-| `version` | `2.0.1` | The chart release. The git tag and the published index entry are `tuwunel-2.0.1`. |
+| `version` | `2.0.2` | The chart release. The git tag and the published index entry are `tuwunel-2.0.2`. |
 | `appVersion` | `v1.9.2` | Metadata only: the tuwunel release the defaults target. The image the pod runs comes from `image.tag` (default `v1.9.2`) — no template reads `appVersion`. |
 | `kubeVersion` | `>=1.31.0-0` | Enforced by Helm before anything is rendered. A cluster below 1.31 cannot take the chart at all. `kubeVersion` was introduced by 2.0.0. |
 
@@ -156,6 +157,58 @@ If your values file predates 1.2.0 rather than 1.1.0, these older changes are st
 | `config.global.address` defaults to `::` (one dual-stack socket) since 1.2.0 | On a pod network without a usable IPv6 stack set it to `0.0.0.0` |
 | Quoted booleans in `config` are rejected since 1.2.0, and values files that still carry them have to be fixed before upgrading | The quoted form is refused by the schema at render time; if such a value reaches the server it exits with `invalid type: found string "false", expected a boolean for key "global.allow_federation"` |
 | The readiness path changed from `/_matrix/federation/v1/version` to `/_tuwunel/server_version` in 1.2.0, and to the exec probe in 2.0.0 | Do not keep a federation path as a health check: it answers 403 as soon as federation is disabled, which is the chart default |
+
+## Upgrading from 2.0.1 or older
+
+Chart 2.0.2 changes what `spec.selector.matchLabels` of the StatefulSet and of the two RTC Deployments
+is rendered from. Up to 2.0.1 the selector was the whole label set, which carries
+`helm.sh/chart: tuwunel-<chart version>` - a value that moves on every chart release. A workload's
+selector is **immutable**, so the first upgrade of a release created by 2.0.1 or older is refused by
+the API server, naming all three objects when RTC is enabled:
+
+```text
+Error: UPGRADE FAILED: server-side apply failed for object <namespace>/<fullname>-jwt apps/v1, Kind=Deployment:
+Deployment.apps "<fullname>-jwt" is invalid: spec.selector: Invalid value:
+{"matchLabels":{"app.kubernetes.io/component":"rtc-jwt",…,"helm.sh/chart":"tuwunel-2.0.2"}}: field is immutable
+```
+
+From 2.0.2 the render reads the live objects and refuses the upgrade itself, printing the commands for
+your release instead of leaving you with the API server error. The check fires only while a live
+object still carries the old selector, so it disappears for good once the commands below have run.
+
+### Run this once
+
+```console
+$ kubectl -n <namespace> delete statefulset <fullname> --cascade=orphan
+$ kubectl -n <namespace> delete deployment <fullname>-jwt <fullname>-livekit    # only with rtc.enabled
+```
+
+then repeat the upgrade - `helm upgrade` as usual, `flux reconcile helmrelease <name> -n <namespace>`
+for a Flux-managed release (a HelmRelease that failed on the API error converges on its own once the
+objects are gone).
+
+What the two commands do, measured on chart 2.0.2 against Kubernetes 1.35:
+
+| Command | Effect |
+| --- | --- |
+| `delete statefulset <fullname> --cascade=orphan` | The homeserver pod is **not** restarted: `--cascade=orphan` leaves it running under the same name, and the StatefulSet the upgrade recreates adopts it - same pod UID, `restartCount` still 0, the database on the PersistentVolumeClaim is never touched |
+| `delete deployment <fullname>-jwt <fullname>-livekit` | Their pods are deleted and recreated by the upgraded release: a couple of seconds without RTC media forwarding. Plain `delete` rather than `--cascade=orphan` is deliberate here - an orphaned Deployment pod has no controller left to clean it up and would keep running forever |
+| Every other object | Untouched. PersistentVolumeClaims, ConfigMaps, Secrets, Services and the Ingress/HTTPRoute are not affected, and no stored data moves |
+
+`helm upgrade --force` does not get past the refusal: the check runs at render time, before Helm
+contacts the cluster. The two commands above are the shorter path anyway - they avoid the pod restart
+a replacement of the StatefulSet would cost.
+
+Whether it applies to your release, before you upgrade (prints the old selector for a release that
+needs the migration, and the new one for a release that does not):
+
+```console
+$ kubectl -n <namespace> get statefulset <fullname> -o jsonpath='{.spec.selector.matchLabels}'
+```
+
+**Fresh installs are not affected**, and neither is any release created by 2.0.2 or later: their
+selectors carry `app.kubernetes.io/name`, `app.kubernetes.io/instance` and the component only, and
+they stay the same through every future chart release.
 
 ## The database migration window
 

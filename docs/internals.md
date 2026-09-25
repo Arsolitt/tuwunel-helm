@@ -238,6 +238,30 @@ It is the **concatenation of two `sha256sum`s** — the first 64 characters hash
 
 The test hook adds one Pod that plain `helm template` already shows: `<fullname>-test-connection`, a busybox container running `wget -q --spider http://<fullname>.<namespace>.svc:<service.port>/_tuwunel/server_version` as UID/GID `65534`, annotated `helm.sh/hook: test` with `helm.sh/hook-delete-policy: before-hook-creation`. It is created only by `helm test` and deleted before the next hook creation, so its absence from a live cluster is expected ([Day-2 operations](./operations.md)).
 
+### Selectors are a fixed label subset
+
+Every selector in the chart - `spec.selector.matchLabels` on the StatefulSet and the two RTC
+Deployments, and the `selector` of each Service - is rendered from `tuwunel.selectorLabels`
+(`app.kubernetes.io/name`, `app.kubernetes.io/instance`) plus the component of the resource. The
+metadata labels and the pod template labels keep the full `tuwunel.labels` set instead, so the pod
+template is always a superset of the selector that has to match it. Three labels are held out of the
+selectors on purpose:
+
+| Label | Why it stays out |
+| --- | --- |
+| `helm.sh/chart` | It carries the chart version, so it moves on every chart release. `spec.selector` is immutable on a StatefulSet and on a Deployment, which makes the next `helm upgrade` unapplyable - that is exactly what happened up to 2.0.1, and what [Upgrading from 2.0.1 or older](./upgrade.md#upgrading-from-201-or-older) cleans up |
+| `app.kubernetes.io/managed-by` | Constant for a Helm-managed release, but it says nothing about which pod is which: a Service that selects on it stops matching pods the moment the release is adopted by another manager |
+| `extraLabels` | Yours, so changing one would move a selector the same way `helm.sh/chart` does - the guarantee "my labels cannot break an upgrade" is worth more than selecting on a label the chart does not own |
+
+The Service selectors are not immutable, but they are held to the same subset for a second reason:
+the new selector is applied before the new pods exist, so a Service that selected on the chart version
+would drop the old pods' endpoints for the whole rollout window. With the fixed subset the old pods
+match the new selector too, and the endpoints never empty.
+
+The `lint` job asserts both properties on every render - no moving label in any selector, and every
+workload's own pod template carrying what its selector asks for - because a single render cannot show
+an immutability defect: the API server only refuses the *next* chart version.
+
 ## What the chart does not do
 
 Each row was checked against the rendered output of the CI scenarios and against the chart's file list:

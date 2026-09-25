@@ -53,7 +53,7 @@ metadata:
     app.kubernetes.io/name: tuwunel
     app.kubernetes.io/instance: tuwunel
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: tuwunel-2.0.1
+    helm.sh/chart: tuwunel-2.0.2
     app.kubernetes.io/component: tuwunel
 spec:
   parentRefs:
@@ -92,7 +92,7 @@ metadata:
     app.kubernetes.io/name: tuwunel
     app.kubernetes.io/instance: tuwunel
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: tuwunel-2.0.1
+    helm.sh/chart: tuwunel-2.0.2
     app.kubernetes.io/component: rtc-ingress
 spec:
   parentRefs:
@@ -201,7 +201,7 @@ metadata:
     app.kubernetes.io/name: tuwunel
     app.kubernetes.io/instance: tuwunel
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: tuwunel-2.0.1
+    helm.sh/chart: tuwunel-2.0.2
     app.kubernetes.io/component: rtc-livekit
 spec:
   parentRefs:
@@ -222,7 +222,7 @@ metadata:
     app.kubernetes.io/name: tuwunel
     app.kubernetes.io/instance: tuwunel
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: tuwunel-2.0.1
+    helm.sh/chart: tuwunel-2.0.2
     app.kubernetes.io/component: rtc-livekit
 spec:
   parentRefs:

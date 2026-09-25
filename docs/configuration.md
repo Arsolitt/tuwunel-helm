@@ -137,6 +137,17 @@ media_storage_providers = ["media_on_s3"]
   ...
 ```
 
+> **Note:** A key upstream's *documentation* describes but its *implementation* never reads is
+> accepted here as well — nothing validates the contents of `config` — and the only sign is a warning
+> per server start: `Config parameter "blurhashing" is unknown to tuwunel, ignoring.`
+> `[global.blurhashing]` (`components_x`, `components_y`, `blurhash_max_raw_size`) is the current
+> example, and the reason the chart's own defaults dropped it in 2.0.0: upstream's `docs/media.md`
+> documents the section and the `blurhashing` compile-time feature it needs, but the v1.9.2 and
+> v1.9.3 sources define neither (no such config section, no such feature, and the two published
+> images warn for `blurhashing` **and** for `blurhash`, verified by starting
+> `ghcr.io/matrix-construct/tuwunel:v1.9.2` with both keys). Blurhash generation cannot be turned on
+> through values today, with either spelling; watch upstream rather than your values file for it.
+
 ### Keys the chart derives
 
 Four keys are injected **only when you have not set them yourself**, so your value always wins:

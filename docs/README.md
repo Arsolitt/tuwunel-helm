@@ -7,7 +7,7 @@
 | Page | Description |
 |------|-------------|
 | [Installing the chart](./installation.md) | Install the tuwunel Helm chart into a Kubernetes cluster, watch the pod come up, and verify that the homeserver actually answers. |
-| [Upgrading](./upgrade.md) | How to move an existing release onto a newer chart version: the values migrations for 2.0.0, the database migration window, and the checks that prove the result. |
+| [Upgrading](./upgrade.md) | How to move an existing release onto a newer chart version: the values migrations for 2.0.0, the one-time selector migration for releases created by 2.0.1 or older, the database migration window, and the checks that prove the result. |
 | [Configuring the server](./configuration.md) | How your values become the server's `config.toml`: the `config` passthrough, the four environment sources, secret placeholders, TOML shape rules, and the two gates that reject a broken configuration before the pod starts. |
 | [Exposing the homeserver with Ingress](./ingress.md) | How to publish the chart's headless Service through an Ingress: the values, the rendered host and path layout, TLS, and the client-IP settings an ingress makes necessary. |
 | [Exposing the homeserver with Gateway API](./gateway-api.md) | Render `HTTPRoute`, `UDPRoute` and `TCPRoute` objects that attach to a Gateway you run, instead of or next to an Ingress. |

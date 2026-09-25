@@ -33,9 +33,13 @@ Breaking changes:
   `CONDUIT_` < `CONDUWUIT_` < `TUWUNEL_`; the chart owns the port and renders `TUWUNEL_PORT` from
   `service.port`. Verified against v1.9.2 with both variables set: the server logs
   `Listening on ["tcp:[::]:8080"]` (the chart's port), not the legacy one.
-- **`config.global.blurhashing` and `config.global.antispam` are gone from the defaults.** Current
-  tuwunel has neither; v1.9.2 starts but warns
-  `Config parameter "blurhashing" is unknown to tuwunel, ignoring.` Remove them from your values.
+- **`config.global.blurhashing` and `config.global.antispam` are gone from the defaults.** No
+  released tuwunel registers either section — v1.9.2 and v1.9.3 start but warn
+  `Config parameter "blurhashing" is unknown to tuwunel, ignoring.` — so remove them from your
+  values. Upstream's `docs/media.md` still documents `[global.blurhashing]` (and the `blurhashing`
+  compile-time feature it says the section needs, which the source does not define), and the shorter
+  `blurhash` is not a key either: both spellings only warn, and neither produces a blurhash. See
+  [Configuring the server](https://github.com/Arsolitt/tuwunel-helm/blob/main/docs/configuration.md).
 - **The readiness probe is an exec probe**, `command: ["tuwunel", "--health-check"]`, not
   `httpGet /_tuwunel/server_version`. The server-version path still answers, but nothing probes it
   any more; `helm test` uses it instead.
@@ -57,6 +61,26 @@ Breaking changes:
 Also new in this release: [online backups](#backups-and-recovery), [media storage providers
 (local and S3)](#media-storage-local-and-s3), [`ip_source`](#client-ip-behind-a-proxy),
 [Gateway API exposure](#gateway-api), the `pod` network mode for LiveKit, and a `helm test` hook.
+
+## Upgrading from 2.0.1 or older
+
+Chart 2.0.2 renders `spec.selector.matchLabels` of the StatefulSet and of the two RTC Deployments
+from a fixed label subset instead of the whole label set. Up to 2.0.1 that set carried
+`helm.sh/chart: tuwunel-<chart version>`, which moves with every chart release, and a workload's
+selector is immutable — so the first upgrade of a release created by 2.0.1 or older is refused by the
+API server with `spec.selector: Invalid value: …: field is immutable`. From 2.0.2 the render detects
+that state and prints the commands for your release; they are:
+
+```console
+$ kubectl -n <namespace> delete statefulset <fullname> --cascade=orphan
+$ kubectl -n <namespace> delete deployment <fullname>-jwt <fullname>-livekit   # only with rtc.enabled
+```
+
+Then repeat the upgrade. The StatefulSet's pod keeps running — the recreated StatefulSet adopts it and
+the database stays on its PersistentVolumeClaim — while the two RTC Deployments recreate their pods
+(a couple of seconds without media forwarding). Fresh installs and releases created by 2.0.2 or later
+are not affected. The measured detail, including the Flux variant, is in
+[Upgrading from 2.0.1 or older](https://github.com/Arsolitt/tuwunel-helm/blob/main/docs/upgrade.md#upgrading-from-201-or-older).
 
 ## Configuration
 

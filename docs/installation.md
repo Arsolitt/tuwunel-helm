@@ -20,7 +20,7 @@
 
 | You need | Details |
 |---|---|
-| Kubernetes | Chart version 2.0.1 declares `kubeVersion: '>=1.31.0-0'` in `Chart.yaml`; Helm refuses anything older. Rendered manifests are CI-checked against Kubernetes 1.31.0 and 1.37.0. |
+| Kubernetes | Chart version 2.0.2 declares `kubeVersion: '>=1.31.0-0'` in `Chart.yaml`; Helm refuses anything older. Rendered manifests are CI-checked against Kubernetes 1.31.0 and 1.37.0. |
 | Helm | The repository documents no minimum Helm version — its CI pins Helm 4.3.0. The chart needs plain `helm install`/`test`/`uninstall` and no plugins or post-renderers. |
 | A `server_name` | The Matrix domain clients and user IDs use. It is a required value: the schema requires the key and a non-empty string, and the StatefulSet template carries a second `required()` guard. |
 | A PersistentVolume provisioner | The default install creates a 4Gi `ReadWriteOnce` claim for `/data`. A cluster with a default StorageClass needs nothing; otherwise set `persistence.data.storageClass` yourself, or pre-create a PV and use the `"-"` sentinel. |
@@ -102,7 +102,9 @@ Objects that only appear when the matching block is enabled:
 
 There is deliberately no other controller surface: no CronJob (scheduled backups are a sidecar container in the same pod driven by the crontab ConfigMap), no operator, no CRDs, and no Gateway/GatewayClass. The StatefulSet always runs exactly one replica — `spec.replicas: 1` is hardcoded and there is no `replicaCount` value.
 
-`<fullname>` is `<release>-tuwunel` unless the release name already contains `tuwunel` or you set `nameOverride`/`fullnameOverride`. Almost every object carries `app.kubernetes.io/name=tuwunel`, `app.kubernetes.io/instance=<release>`, `app.kubernetes.io/managed-by=Helm` and `helm.sh/chart=tuwunel-2.0.1`, plus an `app.kubernetes.io/component`: `tuwunel` on the StatefulSet and the pod template, `tuwunel-backup` on the backup claim and the crontab ConfigMap, `tuwunel-test` on the hook pod. The `<fullname>-configmap` ConfigMap is the exception — it carries no labels at all — and `extraLabels` adds your own wherever the chart's label helper is used.
+`<fullname>` is `<release>-tuwunel` unless the release name already contains `tuwunel` or you set `nameOverride`/`fullnameOverride`. Almost every object carries `app.kubernetes.io/name=tuwunel`, `app.kubernetes.io/instance=<release>`, `app.kubernetes.io/managed-by=Helm` and `helm.sh/chart=tuwunel-2.0.2`, plus an `app.kubernetes.io/component`: `tuwunel` on the StatefulSet and the pod template, `tuwunel-backup` on the backup claim and the crontab ConfigMap, `tuwunel-test` on the hook pod. The `<fullname>-configmap` ConfigMap is the exception — it carries no labels at all — and `extraLabels` adds your own wherever the chart's label helper is used.
+
+**Selectors are a subset of those labels**: `spec.selector.matchLabels` on the StatefulSet and on the two RTC Deployments, and the `selector` of every Service, carry `app.kubernetes.io/name`, `app.kubernetes.io/instance` and the component only. Nothing that moves with the chart version belongs there — a workload's selector is immutable, so `helm.sh/chart` in it makes the next chart release unapplyable (chart 2.0.1 and older did exactly that, see [Upgrading from 2.0.1 or older](./upgrade.md#upgrading-from-201-or-older)), and `extraLabels` is deliberately excluded as well, because changing it would move a selector the same way.
 
 How those objects and the configuration flow together is described in [How the chart renders a running server](./internals.md).
 

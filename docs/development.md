@@ -28,7 +28,7 @@ tuwunel-helm/
 │   ├── dependabot.yml             # weekly, grouped GitHub Actions updates
 │   └── PULL_REQUEST_TEMPLATE.md   # what changed / how it was verified / checklist
 ├── charts/tuwunel/                # the chart
-│   ├── Chart.yaml                 # name tuwunel, version 2.0.1, appVersion v1.9.2, kubeVersion '>=1.31.0-0'
+│   ├── Chart.yaml                 # name tuwunel, version 2.0.2, appVersion v1.9.2, kubeVersion '>=1.31.0-0'
 │   ├── values.yaml                # defaults (server_name: "yourdomain.com", image.tag: v1.9.2)
 │   ├── values.schema.json         # applied by every helm command
 │   ├── README.md                  # canonical value reference; ships inside the packaged chart
@@ -47,6 +47,7 @@ tuwunel-helm/
 ├── docs/                          # this documentation tree
 ├── hack/
 │   ├── runtime-check.sh           # the runtime gate - the `runtime` job just calls it
+│   ├── selector-check.py          # the selector gate - the `lint` job calls it per render
 │   └── release-notes.sh           # prints a CHANGELOG section as the GitHub release body
 ├── AGENTS.md                      # conventions: style, fixture rules, CI/release rules
 ├── CHANGELOG.md                   # Keep a Changelog; a released version's section is its release body
@@ -54,7 +55,7 @@ tuwunel-helm/
 └── README.md                      # landing page, install instructions, the release flow
 ```
 
-There is no test framework. `find . -name '*test*'` returns only `charts/tuwunel/templates/tests/test-connection.yaml` (the `helm test` hook), and `hack/` holds exactly two scripts. Local build artifacts are gitignored: `.tmp`, `output`, `*.tgz`, `.cr-release-packages/`, `.cr-index/`.
+There is no test framework. `find . -name '*test*'` returns only `charts/tuwunel/templates/tests/test-connection.yaml` (the `helm test` hook), and `hack/` holds exactly three scripts. Local build artifacts are gitignored: `.tmp`, `output`, `*.tgz`, `.cr-release-packages/`, `.cr-index/`.
 
 ## Fixture categories
 
@@ -163,6 +164,7 @@ Run these from the repository root. Every one of them is also what CI runs.
 | `helm template … \| kubeconform -strict -summary …` | rendered manifests are valid against a Kubernetes schema |
 | the `ci/invalid/` loop | the schema still refuses these shapes |
 | the `ci/invalid-render/` loop | the templates still refuse these combinations |
+| the selector assertion (CI step `Selectors are immutable and select their own pods`) | no selector carries a label that moves with the chart version, and every workload's pod template carries what its selector asks for - on the defaults and on every scenario |
 | `hack/runtime-check.sh charts/tuwunel` | the real image starts per scenario, the rendered probe exits 0, the readiness URL answers 200, and the backup path works where the scenario enables it - through the rendered sidecar when its schedule can fire, otherwise through the crontab's own command |
 
 ```console
@@ -171,6 +173,7 @@ $ for f in charts/tuwunel/ci/*-values.yaml; do helm template ci charts/tuwunel -
 $ helm template ci charts/tuwunel --set server_name=matrix.example.org | kubeconform -strict -summary -kubernetes-version 1.31.0
 $ for f in charts/tuwunel/ci/invalid/*.yaml; do helm template ci charts/tuwunel -f "$f" > /dev/null && echo "unexpectedly accepted: $f"; done
 $ for f in charts/tuwunel/ci/invalid-render/*.yaml; do helm template ci charts/tuwunel -f "$f" > /dev/null && echo "unexpectedly accepted: $f"; done
+$ helm template ci charts/tuwunel > /tmp/render.yaml && python3 hack/selector-check.py /tmp/render.yaml
 $ hack/runtime-check.sh charts/tuwunel
 ```
 
@@ -181,6 +184,7 @@ Read the output of the two negative loops: they only `echo "unexpectedly accepte
 | `helm lint --strict` | non-zero exit with the offending template path or schema violation |
 | scenario render loop | `helm template` fails and the loop exits 1 |
 | kubeconform | non-zero exit with per-resource errors; CI runs it on both pinned versions (`1.31.0` and `1.37.0`) and additionally asserts the summary reports exactly as many resources as the render has `kind:` lines and that it ends with `Skipped: 0` |
+| the selector assertion | `::error::a selector breaks an upgrade - <fixture>: <object> selects on helm.sh/chart: …`, and the step exits 1; `hack/selector-check.py` exits 1 on the first render with a finding, and 2 when the render has no workload or no Service |
 | runtime check | `FAIL <values> <image> -> <assertion>` plus the container's last 30 log lines; the script exits 1 on the first failing scenario |
 
 > **Warning:** `helm lint --strict` can exit 0 on values that `helm install`/`upgrade` refuse. The chart's cross-value guards surface as `level=INFO msg="funcMap fail"` during lint while the exit code stays 0, so verify those changes with `helm template` or `helm install --dry-run`, not with lint alone.
@@ -206,7 +210,7 @@ $ helm package charts/tuwunel
 
 | Job | Name | Runs | Protects against |
 |---|---|---|---|
-| `lint` | Lint and validate manifests | `helm lint --strict` for the defaults and every scenario; `helm template` + `kubeconform -strict` for the **default values** and every scenario, on each version in `KUBERNETES_VERSIONS`; two assertions on the renders themselves - `Service types render an applyable clusterIP` (the headless default is kept, a LoadBalancer renders no `clusterIP`) and `Rendered host lists carry no empty entries` (every `spec.tls[].hosts[]`, `spec.rules[].host` and route `spec.hostnames[]` has to be a host the API server accepts - an RFC 1123 subdomain, optionally `*.`-prefixed - so an empty entry, a port or a scheme in any rendered host fails the step; it runs over the default values and every scenario) | a scenario that stops rendering, a manifest that violates the Kubernetes or Gateway API schemas, and the two combinations no schema can see: `clusterIP: "None"` is legal on a ClusterIP Service only, and kubeconform's Ingress schema accepts an empty host that the API server refuses |
+| `lint` | Lint and validate manifests | `helm lint --strict` for the defaults and every scenario; `helm template` + `kubeconform -strict` for the **default values** and every scenario, on each version in `KUBERNETES_VERSIONS`; three assertions on the renders themselves - `Service types render an applyable clusterIP` (the headless default is kept, a LoadBalancer renders no `clusterIP`) and `Rendered host lists carry no empty entries` (every `spec.tls[].hosts[]`, `spec.rules[].host` and route `spec.hostnames[]` has to be a host the API server accepts - an RFC 1123 subdomain, optionally `*.`-prefixed - so an empty entry, a port or a scheme in any rendered host fails the step; it runs over the default values and every scenario); and `Selectors are immutable and select their own pods` (no `spec.selector.matchLabels` and no Service `selector` may carry `helm.sh/chart`, `app.kubernetes.io/version` or `app.kubernetes.io/managed-by`, and every workload's own pod template has to carry the pairs its selector asks for - a selector that moves with the chart version renders fine and is only discovered by the *next* chart release, which is what happened up to 2.0.1) | a scenario that stops rendering, a manifest that violates the Kubernetes or Gateway API schemas, and the three combinations no schema can see: `clusterIP: "None"` is legal on a ClusterIP Service only, kubeconform's Ingress schema accepts an empty host that the API server refuses, and a selector that moves with the chart version only fails on the *next* chart release |
 | `schema` | Value schema guardrails | every `ci/invalid/*.yaml` must be refused by the schema; every `ci/invalid-render/*.yaml` must be refused by a template and name its value; every scenario must still render | a weakened `values.schema.json` or a dropped template guard |
 | `runtime` | Runtime smoke test against the real image | checkout, the pinned Helm, then `hack/runtime-check.sh "$CHART_DIR"` (`timeout-minutes: 25`) | a config value of the wrong TOML type and a readiness path that answers non-200 - neither is visible to the shape-only jobs; for a schedule that can fire inside the wait window it also starts the rendered backup sidecar, so a sidecar whose job `crond` cannot start fails here |
 | `release` | Release chart | chart-releaser, then `gh release edit` with the CHANGELOG section | an unpublished version bump and a release body that stayed the chart description |
