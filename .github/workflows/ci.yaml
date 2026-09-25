@@ -488,22 +488,41 @@ jobs:
           fi
           echo "::notice::packaged $(basename "$package") from the tag"
 
-      # chart-releaser attaches the release to the `<chart>-<version>` tag that
-      # already exists and rewrites `index.yaml` on gh-pages. `skip_packaging` is
-      # required: the action's own packaging publishes "charts changed since the
-      # previous tag" and silently publishes nothing when the tagged tree has no
-      # chart diff - here the tag, not a diff, decides what is released.
-      # `skip_existing` makes a re-run after a failed step idempotent, and a
-      # candidate must never take the "Latest" badge.
-      - name: Publish the release and the chart repository index
+      # The action installs the pinned `cr` binary only. Its own release path is
+      # unusable here: the packaging branch is exactly what this job replaces
+      # (it publishes "charts changed since the previous tag", which is not the
+      # contract), and with `skip_packaging` its script dies on an unbound
+      # variable - `cr.sh` writes `chart_version=${latest_tag}` outside the
+      # branch that sets `latest_tag`, and `set -o nounset` turns that into a
+      # failure *after* the upload and the index push have already succeeded
+      # (fixed on the action's main, unreleased as of v1.7.0). The job would go
+      # red with the release published and the notes and the version record
+      # skipped, so the two commands run here instead.
+      - name: Install chart-releaser
         uses: helm/chart-releaser-action@v1.7.0
         with:
           version: ${{ env.CHART_RELEASER_VERSION }}
-          skip_packaging: true
-          skip_existing: true
-          mark_as_latest: ${{ needs.release-tag.outputs.channel == 'stable' }}
+          install_only: true
+
+      # `cr upload` attaches the release to the `<chart>-<version>` tag that
+      # already exists, from the package this job built; `cr index` rewrites
+      # `index.yaml` on gh-pages. `--skip-existing` makes a re-run after a
+      # failed step idempotent, and a candidate must never take the "Latest"
+      # badge. Both read the token from `CR_TOKEN`, like the action does.
+      - name: Publish the release and the chart repository index
         env:
           CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANNEL: ${{ needs.release-tag.outputs.channel }}
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY%%/*}"
+          repo="${GITHUB_REPOSITORY#*/}"
+          args=(-o "$owner" -r "$repo" -c "$(git rev-parse HEAD)" --skip-existing)
+          if [ "$CHANNEL" != "stable" ]; then
+            args+=(--make-release-latest=false)
+          fi
+          cr upload "${args[@]}"
+          cr index -o "$owner" -r "$repo" --push
 
       # The body is the repository's own text: the `## [<version>]` section of
       # CHANGELOG.md at the tag (a candidate uses the section of the version it
