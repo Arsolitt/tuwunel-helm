@@ -1,0 +1,15 @@
+# MUST fail the render (not the schema): includeServerName: false drops the
+# server_name entry from the Ingress rules and its TLS host list, and no other
+# host is configured here - well_known.server is unset and ingress.extraHosts
+# is empty. An Ingress with no rule is accepted by the API server and routes
+# nothing, so the template refuses the render instead of emitting one that
+# silently serves no traffic.
+#
+# expect-error: includeServerName=false leaves the Ingress without a hostname
+server_name: ci.example
+
+includeServerName: false
+
+ingress:
+  enabled: true
+  class: nginx

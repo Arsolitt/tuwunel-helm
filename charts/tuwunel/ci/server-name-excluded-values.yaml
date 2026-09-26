@@ -1,0 +1,34 @@
+# Scenario: the apex served elsewhere - its /.well-known/matrix/client and
+# /.well-known/matrix/server documents are static files next to a site on
+# another host, so its DNS does not point at this cluster and it can never pass
+# a certificate challenge - while the homeserver itself answers on the
+# delegated domain. includeServerName: false drops only the server_name entry
+# from the host fields; the delegated domain from well_known.server and the
+# explicit extras (ingress.extraHosts, gateway.hostnames) are rendered as
+# before, so both exposure paths still have hosts to serve - which is exactly
+# what the render requires of this value.
+server_name: ci.example
+
+includeServerName: false
+
+config:
+  global:
+    allow_federation: true
+    well_known:
+      client: https://matrix.ci.example
+      server: matrix.ci.example:443
+
+ingress:
+  enabled: true
+  class: nginx
+  tls: true
+  extraHosts:
+    - alias.ci.example
+
+gateway:
+  enabled: true
+  parentRefs:
+    - name: ci-gateway
+      sectionName: https
+  hostnames:
+    - alt.ci.example

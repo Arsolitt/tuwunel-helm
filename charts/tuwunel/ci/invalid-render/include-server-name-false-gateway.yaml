@@ -1,0 +1,17 @@
+# MUST fail the render (not the schema): includeServerName: false leaves the
+# HTTPRoute hostname list empty - server_name is the only hostname this fixture
+# configures, with well_known.server and gateway.hostnames unset. An empty
+# hostnames list is not "no hostnames" to the Gateway API: it matches every
+# hostname the listener serves, the opposite of excluding one, so the template
+# refuses the render instead of emitting a route that claims hosts the
+# deployment never configured.
+#
+# expect-error: includeServerName=false leaves the HTTPRoute without a hostname
+server_name: ci.example
+
+includeServerName: false
+
+gateway:
+  enabled: true
+  parentRefs:
+    - name: ci-gateway

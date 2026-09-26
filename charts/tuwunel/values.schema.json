@@ -402,6 +402,10 @@
       "type": "string",
       "minLength": 1
     },
+    "includeServerName": {
+      "description": "Whether the server_name host is rendered into the host fields: the Ingress rule and its TLS host, and the HTTPRoute hostname. A boolean; `false` is for a deployment whose apex is served elsewhere, and the exposure templates refuse the render when it leaves an Ingress or an HTTPRoute without any host.",
+      "type": "boolean"
+    },
     "image": {
       "description": "Main tuwunel image. Its tag is rendered through tpl(), so it may reference other values.",
       "$ref": "#/definitions/imageSpec"
