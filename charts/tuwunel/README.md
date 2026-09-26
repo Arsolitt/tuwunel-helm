@@ -92,6 +92,7 @@ The following tables list the configurable parameters of the tuwunel chart and t
 | ---------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------- |
 | `server_name`                      | Server name (your Matrix domain)                                                            | `yourdomain.com`                   |
 | `includeServerName`                | Whether the host fields derived from `server_name` are rendered (Ingress, TLS, HTTPRoute)   | `true`                             |
+| `serverNameWellKnownOnly`          | Whether the `server_name` host serves only `/.well-known/matrix`                            | `false`                            |
 | `image.repository`                 | Image repository                                                                            | `ghcr.io/matrix-construct/tuwunel` |
 | `image.tag`                        | Image tag; needs v1.9.0 or newer for the chart's env and probe contract                      | `v1.9.3`                           |
 | `image.pullPolicy`                 | Image pull policy                                                                           | `IfNotPresent`                     |
@@ -117,6 +118,20 @@ would leave an Ingress or an `HTTPRoute` without a hostname: an Ingress with an 
 routes nothing, and a route with an empty `hostnames` list matches every hostname its listener
 serves. See
 [Exposing the homeserver with Ingress](https://github.com/Arsolitt/tuwunel-helm/blob/main/docs/ingress.md).
+
+The Gateway API render splits the homeserver across two routes whenever the apex is rendered
+(`includeServerName` true with a delegated domain set): `<fullname>` serves the delegated domain
+and `gateway.hostnames` with its catch-all `/` rule, and `<fullname>-server-name` carries
+`server_name` with only the Matrix paths - never `/` - so the apex root stays free for a route of
+your own. `serverNameWellKnownOnly: true` narrows that host to the discovery documents: the Ingress
+rule for the apex keeps only the `/.well-known/matrix` path, and the `<fullname>-server-name` route
+drops its `/_matrix` match. The default keeps both paths, because clients and scripts that
+address `server_name` directly and skip discovery rely on `/_matrix` being routed there - upstream's
+root-domain delegation guide proxies only `/.well-known/matrix/*` from the apex, which is the layout
+this value opts into. The apex keeps its TLS host either way: its DNS points at the cluster, which
+is why the chart serves it at all. The render refuses the value without a delegated domain - there
+is no apex route to narrow, and narrowing the only host served would leave the client API
+unroutable.
 
 `dibi/envsubst:1` is published for `linux/amd64` only. On an arm64 node either point
 `initContainer.image` at a multi-arch (or mirrored) equivalent or pin the pod to an amd64 node;
@@ -274,7 +289,9 @@ certificate has to cover each name (through cert-manager annotations issuing it,
 Setting `ingress.extraHosts` adds a hostname to both the rules and that list. With
 `includeServerName: false` the `server_name` rule and its host in that list are dropped, while the
 delegated domain and `ingress.extraHosts` stay; a render whose rules would be empty is refused
-instead of applied with nothing to route.
+instead of applied with nothing to route. With `serverNameWellKnownOnly: true` the `server_name`
+rule keeps only the `/.well-known/matrix` path - `/_matrix` is not routed on the apex - while the
+delegated catch-all rule, `ingress.extraHosts` and the `spec.tls` host list are unchanged.
 
 Every host field the chart renders goes through the same normalisation: a trailing `:port` is
 stripped from `server_name`, `ingress.extraHosts`, `gateway.hostnames` and the delegated domain,
@@ -294,15 +311,25 @@ the listeners, the TLS certificates and the addresses of that Gateway stay yours
 same time; they are served by different controllers, so running both is the supported state during
 a cutover.
 
-The homeserver route is named `<fullname>` and carries every hostname the server has to answer for:
-`server_name`, the delegated domain from `config.global.well_known.server` and
-`gateway.hostnames`, each through the same host normalisation the Ingress uses - a trailing `:port`
-is stripped and a scheme fails the render - so a route hostname is always a bare hostname. With
-`includeServerName: false` the `server_name` hostname is dropped, while the delegated domain and
-`gateway.hostnames` stay; a render that would leave the list empty is refused, because a route with
-an empty `hostnames` list matches every hostname its listener serves. A single
-catch-all `PathPrefix /` rule points at `<fullname>:service.port`; with both hostnames listed, one
-rule covers what the Ingress splits into separate path sets.
+The homeserver route is named `<fullname>` and carries the hostnames of the delegated homeserver:
+the delegated domain from `config.global.well_known.server` and `gateway.hostnames`, each through
+the same host normalisation the Ingress uses - a trailing `:port` is stripped and a scheme fails the
+render - so a route hostname is always a bare hostname. `server_name` joins them when there is no
+delegated domain, because the apex is the homeserver then. With `includeServerName: false` the
+`server_name` hostname is dropped, while the delegated domain and `gateway.hostnames` stay; a render
+that would leave the list empty is refused, because a route with an empty `hostnames` list matches
+every hostname its listener serves. A single catch-all `PathPrefix /` rule points at
+`<fullname>:service.port`.
+
+Whenever the apex is rendered as well, the chart adds an apex route named `<fullname>-server-name`.
+It carries only `server_name` and matches the same two prefixes the Ingress serves on that host -
+`/.well-known/matrix` and `/_matrix` - and never `/`, so the apex root stays free for a route of
+your own; with `serverNameWellKnownOnly: true` only `/.well-known/matrix` remains. The route reuses
+`gateway.parentRefs` and `gateway.annotations`, since a controller opt-in has to reach every route
+the chart renders. Listing the apex in `gateway.hostnames` serves it in full again, because the
+catch-all route then claims it - and a delegated domain equal to `server_name` is not special-cased,
+landing in the same place. Without a delegated domain there is one route, whose catch-all claims `/`
+on the apex, because the apex is the homeserver then.
 
 | Parameter             | Description                                             | Default         |
 | --------------------- | ------------------------------------------------------- | --------------- |

@@ -1,0 +1,16 @@
+# MUST fail the render (not the schema): serverNameWellKnownOnly: true narrows
+# the server_name host to /.well-known/matrix, and with no delegated domain -
+# config.global.well_known.server is unset here - that host is the only one the
+# Ingress serves. Every other path, the client API included, would be
+# unroutable, so the template refuses the render instead of emitting an Ingress
+# that silently drops that traffic. includeServerName stays at its default, so
+# the refusal is the narrowing and not the empty-host rule.
+#
+# expect-error: serverNameWellKnownOnly=true needs config.global.well_known.server
+server_name: ci.example
+
+serverNameWellKnownOnly: true
+
+ingress:
+  enabled: true
+  class: nginx

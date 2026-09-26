@@ -406,6 +406,10 @@
       "description": "Whether the server_name host is rendered into the host fields: the Ingress rule and its TLS host, and the HTTPRoute hostname. A boolean; `false` is for a deployment whose apex is served elsewhere, and the exposure templates refuse the render when it leaves an Ingress or an HTTPRoute without any host.",
       "type": "boolean"
     },
+    "serverNameWellKnownOnly": {
+      "description": "Whether the server_name host serves the discovery documents alone: its Ingress rule loses the /_matrix path, and the route the chart renders for that host loses it as well, keeping /.well-known/matrix as its single prefix. A boolean; `true` is for a deployment whose apex resolves to the cluster but should answer nothing beyond delegation, and it needs config.global.well_known.server - the exposure templates refuse the render when server_name would be the only host they serve, since narrowing that one leaves every other path unroutable.",
+      "type": "boolean"
+    },
     "image": {
       "description": "Main tuwunel image. Its tag is rendered through tpl(), so it may reference other values.",
       "$ref": "#/definitions/imageSpec"

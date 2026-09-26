@@ -31,11 +31,12 @@ The values below are the ones this page uses; the chart README's [Gateway API](.
 
 ## What the chart renders
 
-Four objects at most, one per purpose:
+Five objects at most, one per purpose:
 
 | Object name               | Kind        | Rendered when                                          | Carries                                            |
 | ------------------------- | ----------- | ------------------------------------------------------ | -------------------------------------------------- |
-| `<fullname>`              | `HTTPRoute` | `gateway.enabled`                                      | the homeserver, all of its hostnames               |
+| `<fullname>`              | `HTTPRoute` | `gateway.enabled`                                      | the homeserver; the delegated domain and `gateway.hostnames` |
+| `<fullname>-server-name`  | `HTTPRoute` | `gateway.enabled` with a delegated domain and `includeServerName` | the apex; the Matrix paths, never `/`              |
 | `<fullname>-rtc`          | `HTTPRoute` | `rtc.enabled` and `rtc.gateway.enabled`                | `rtc.domain`: the JWT paths and LiveKit's HTTP API |
 | `<fullname>-livekit-udp`  | `UDPRoute`  | `rtc.enabled` and `rtc.livekit.gateway.udpRoute`       | LiveKit UDP media                                  |
 | `<fullname>-livekit-tcp`  | `TCPRoute`  | `rtc.enabled` and `rtc.livekit.gateway.tcpRoute`       | LiveKit TCP media                                  |
@@ -60,7 +61,6 @@ spec:
     - name: eg
       sectionName: https
   hostnames:
-    - example.com
     - matrix.example.com
     - alt.example.com
   rules:
@@ -75,13 +75,61 @@ spec:
 
 - The name is the chart's `<fullname>` helper output: `fullnameOverride` when set, otherwise the release name if it already contains the chart name (or `nameOverride`), otherwise `<release>-<chart>` — `tuwunel` for a release named `tuwunel`.
 - `parentRefs` is emitted verbatim from `gateway.parentRefs` (no defaults injected, no field filtering).
-- `hostnames` is derived, not copied from a single value: `server_name` first (unless `includeServerName: false` drops it), then the delegated domain from `config.global.well_known.server` with any `:port` stripped, then every entry of `gateway.hostnames`. The list is deduplicated, so a delegated host that equals `server_name` (as in the chart's CI fixture `charts/tuwunel/ci/gateway-values.yaml`) shows up once.
+- `hostnames` is derived, not copied from a single value: the delegated domain from `config.global.well_known.server` with any `:port` stripped, then every entry of `gateway.hostnames` — plus `server_name` itself when there is no delegated domain (unless `includeServerName: false` drops it). The list is deduplicated, so a delegated host that equals `server_name` (as in the chart's CI fixture `charts/tuwunel/ci/gateway-values.yaml`) shows up once.
 - `gateway.annotations` are copied onto the object as-is (controller-specific opt-ins).
-- There is exactly one rule: a single `PathPrefix /` catch-all whose backend is the chart's Service (`<fullname>`) on `service.port` (8080 by default). Unlike the Ingress, the delegated host needs no separate path set — the server answers for both hostnames itself.
+- There is exactly one rule: a single `PathPrefix /` catch-all whose backend is the chart's Service (`<fullname>`) on `service.port` (8080 by default).
+- With a delegated domain the apex is not served here at all: it moves to `<fullname>-server-name`, which carries the Matrix paths and never `/` (below). Without delegation the apex is the homeserver, so it stays on this route and the catch-all covers everything.
+
+### The apex route
+
+When the apex is rendered and a delegated domain is set, the chart splits it off into a second route, `<fullname>-server-name`:
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: tuwunel-server-name
+  labels:
+    app.kubernetes.io/name: tuwunel
+    app.kubernetes.io/instance: tuwunel
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: tuwunel-2.0.2
+    app.kubernetes.io/component: tuwunel
+spec:
+  parentRefs:
+    - name: eg
+      sectionName: https
+  hostnames:
+    - example.com
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /.well-known/matrix
+        - path:
+            type: PathPrefix
+            value: /_matrix
+      backendRefs:
+        - name: tuwunel
+          port: 8080
+```
+
+The `matches` list is the Ingress apex rule's path set reproduced on a route: `/.well-known/matrix` and `/_matrix`, neither of them `/`. Both values carry no trailing slash, deliberately — `PathPrefix` matches on path element boundaries, so `/.well-known/matrix/` would stop matching the bare path a client probes before it appends `/client` or `/server`. Two objects are needed because `HTTPRoute` scopes paths per route, not per rule: the CRD has no rule-level `hostnames` — a `rules[]` entry carries `backendRefs`, `filters`, `matches`, `name`, `retry`, `sessionPersistence` and `timeouts`, and nothing that could bind a path to one hostname. The route reuses `gateway.parentRefs` and `gateway.annotations` — a controller opt-in has to reach every route the chart renders — and carries the same labels, `app.kubernetes.io/component: tuwunel` included.
+
+The split is what keeps the apex root unclaimed: `https://example.com/` matches neither prefix, so you can attach your own `HTTPRoute` (or Ingress) to the same listener for a site there without the homeserver in front of it. That mirrors the Ingress side, where the apex rule also carries only the two prefixes.
+
+`serverNameWellKnownOnly: true` narrows the path set further, to `/.well-known/matrix` alone — the layout upstream's [root-domain delegation guide](https://matrix-construct.github.io/tuwunel/deploying/root-domain-delegation.html) describes. The value needs a delegated domain: without one the apex would be the only hostname the routes serve, so the render refuses it ([Parent refs and hostnames](#parent-refs-and-hostnames) carries the message). It is inert with `includeServerName: false` — no apex hostname, hence no apex route — and it does not touch the homeserver route.
+
+Two ways back to a full apex on this path:
+
+- List the apex in `gateway.hostnames`. The catch-all route then carries it as well, so the apex serves everything again — including the admin surface, `/_tuwunel/*` and the RTC control paths, which the apex route alone does not cover.
+- Or route what you need from the object you attach at the apex root.
+
+> **Warning:** the split changed the rendered objects for existing Gateway API installs: the apex used to be one of the catch-all route's hostnames, and it is now a route of its own with the Matrix path set. An install that relied on the apex catch-all for paths outside that set has to list the apex in `gateway.hostnames`, or reach those paths on the delegated domain. A delegated domain equal to `server_name` is not special-cased: the two routes then share the host, and the catch-all route keeps serving everything outside the Matrix prefixes there.
 
 ### The RTC route
 
-With `rtc.enabled` and `rtc.gateway.enabled` the chart adds a second `HTTPRoute` for `rtc.domain`. It is `rtc.enabled` that gates it, exactly like `rtc.ingress`: setting `rtc.gateway.enabled` alone renders nothing, and no error.
+With `rtc.enabled` and `rtc.gateway.enabled` the chart adds another `HTTPRoute`, for `rtc.domain`. It is `rtc.enabled` that gates it, exactly like `rtc.ingress`: setting `rtc.gateway.enabled` alone renders nothing, and no error.
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
@@ -142,7 +190,7 @@ The chart installs no CRDs. Your cluster must provide the `gateway.networking.k8
 | `UDPRoute`  | Gateway API v1.6 — absent from some vendor bundles        | LiveKit UDP media             |
 | `TCPRoute`  | Gateway API v1.6 — absent from some vendor bundles        | LiveKit TCP media             |
 
-A cluster running an older bundle loses only the media routes: the two `HTTPRoute`s are unaffected. If a kind is missing entirely, the API server rejects that object at install/upgrade time, and nothing in the chart catches it first: the route templates do not gate on `Capabilities`, so they cannot tell whether a route kind exists in the cluster. Rendering does consult cluster API versions elsewhere — the Ingress template picks its `apiVersion` from `.Capabilities.APIVersions.Has "networking.k8s.io/v1"`, and on install/upgrade Helm fills those capabilities from the target cluster (`helm template` uses its built-in defaults unless `--api-versions` says otherwise). The route templates have no such gate: they render the kinds you enable, and the API server is what refuses them.
+A cluster running an older bundle loses only the media routes: the `HTTPRoute`s are unaffected. If a kind is missing entirely, the API server rejects that object at install/upgrade time, and nothing in the chart catches it first: the route templates do not gate on `Capabilities`, so they cannot tell whether a route kind exists in the cluster. Rendering does consult cluster API versions elsewhere — the Ingress template picks its `apiVersion` from `.Capabilities.APIVersions.Has "networking.k8s.io/v1"`, and on install/upgrade Helm fills those capabilities from the target cluster (`helm template` uses its built-in defaults unless `--api-versions` says otherwise). The route templates have no such gate: they render the kinds you enable, and the API server is what refuses them.
 
 What CI does check, on every run:
 
@@ -158,7 +206,7 @@ What CI does check, on every run:
 
 ```console
 $ helm template ci charts/tuwunel -f charts/tuwunel/ci/invalid-render/gateway-without-parentrefs.yaml
-Error: execution error at (tuwunel/templates/gateway/httproute.yaml:5:4): gateway.enabled needs gateway.parentRefs: the chart renders HTTPRoutes that attach to a Gateway you run, it does not create one
+Error: execution error at (tuwunel/templates/gateway/httproute.yaml:6:4): gateway.enabled needs gateway.parentRefs: the chart renders HTTPRoutes that attach to a Gateway you run, it does not create one
 ```
 
 This is a template failure, not a schema failure: an `HTTPRoute` with an empty `parentRefs` list is valid for the CRD — it would simply attach to nothing and carry no traffic — so `values.schema.json` accepts the values. `helm lint --strict -f charts/tuwunel/ci/invalid-render/gateway-without-parentrefs.yaml charts/tuwunel` does surface the guard, but as a note rather than a failure: it prints `level=INFO msg="funcMap fail" message="gateway.enabled needs gateway.parentRefs: …"` and still exits 0 with `0 chart(s) failed`. CI fails the fixture with `helm template` instead, which reports the error above and exits non-zero. Either way the message names the value to set.
@@ -178,13 +226,15 @@ Unknown members are allowed here — the field set belongs to Gateway API, not t
 
 Hostnames are derived from three sources, in this order, then deduplicated:
 
-1. `server_name` — added unless `includeServerName: false` excludes it, which leaves the identity where it is and drops only the route hostname.
+1. `server_name` — added unless `includeServerName: false` excludes it, which leaves the identity where it is and drops only the route hostname. With a delegated domain it does not stay here: the apex moves to `<fullname>-server-name` (below), which is why this route's list then holds the delegated domain and `gateway.hostnames` alone.
 2. the delegated domain from `config.global.well_known.server`, with any `:port` stripped (the [federation delegation](./federation.md) rule the Ingress already follows). Setting only `config.global.well_known.client` adds nothing to the route.
 3. every entry of `gateway.hostnames`.
 
-So `server_name: example.com` plus `config.global.well_known.server: matrix.example.com:8448` plus `gateway.hostnames: [alt.example.com]` renders `[example.com, matrix.example.com, alt.example.com]`.
+So `server_name: example.com` plus `config.global.well_known.server: matrix.example.com:8448` plus `gateway.hostnames: [alt.example.com]` renders `[matrix.example.com, alt.example.com]` on this route and `[example.com]` on the apex route; without the delegated domain the same install renders `[example.com, alt.example.com]` here and no second route. Listing the apex in `gateway.hostnames` puts it back on this route as well, catch-all included — see [The apex route](#the-apex-route) for what that restores.
 
 > **Note:** `includeServerName: false` has to leave another hostname behind. An `HTTPRoute` with an empty `hostnames` list does not match *no* hostname — Gateway API matches such a route for every hostname its listener serves — so the chart refuses the render instead of publishing a route that answers for hosts it was never meant to carry: `includeServerName=false leaves the HTTPRoute without a hostname: server_name is its only hostname unless the delegated domain (config.global.well_known.server) or gateway.hostnames supplies one; a route with an empty hostnames list matches every hostname its listener serves`. A delegated domain that equals `server_name` still counts, because it is rendered from its own value rather than from the identity.
+
+> **Note:** `serverNameWellKnownOnly: true` needs a delegated domain too, for the same reason: with the apex as the only hostname the route serves, narrowing it to `/.well-known/matrix` would leave every other path unroutable. The render refuses it with `serverNameWellKnownOnly=true needs config.global.well_known.server: without a delegated domain the server_name host is the only hostname the route serves, so narrowing it to /.well-known/matrix would leave every other path unroutable`.
 
 > **Note:** adding a hostname to the route is not enough on its own — the Gateway listener must also serve it. The chart cannot check that, and a listener that does not bind the hostname rejects the route or never matches it.
 
@@ -269,7 +319,7 @@ A media route has no `matches` at all — one rule carrying only `backendRefs`, 
 
 ## A complete example
 
-Save this as `gateway-values.yaml` — it attaches both HTTP routes to an existing Gateway `eg`, picks its `https` listener for HTTP and its `media` listener for the LiveKit ports, and runs LiveKit in `pod` mode so the media ports exist on the Service:
+Save this as `gateway-values.yaml` — it attaches the HTTP routes to an existing Gateway `eg`, picks its `https` listener for HTTP and its `media` listener for the LiveKit ports, and runs LiveKit in `pod` mode so the media ports exist on the Service:
 
 ```yaml
 server_name: example.com
@@ -327,6 +377,10 @@ metadata:
 --
 kind: HTTPRoute
 metadata:
+  name: tuwunel-server-name
+--
+kind: HTTPRoute
+metadata:
   name: tuwunel-rtc
 --
 kind: TCPRoute
@@ -373,11 +427,12 @@ The two describe the same host differently, so do not compare their manifests 1:
 
 |                          | Ingress                                                                                 | Gateway API                                          |
 | ------------------------ | --------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| Object                    | `Ingress` `<fullname>`                                                                   | `HTTPRoute` `<fullname>`                             |
-| `server_name` host        | split into `/.well-known/matrix` and `/_matrix` `Prefix` paths                            | one `PathPrefix /` rule covering everything          |
-| Delegated host            | its own `/` path set                                                                      | the same catch-all rule, hostname added to `hostnames` |
+| Object                    | `Ingress` `<fullname>`                                                                   | `HTTPRoute` `<fullname>`, plus `<fullname>-server-name` when the apex is rendered with a delegated domain |
+| `server_name` host        | split into `/.well-known/matrix` and `/_matrix` `Prefix` paths, leaving the root unclaimed | a route of its own with the same path set and no `/` rule; without delegation the apex sits on the catch-all route instead |
+| `serverNameWellKnownOnly: true` | the apex rule keeps only the `/.well-known/matrix` path; the TLS host list and the catch-all rules are unchanged | the apex route keeps only the `/.well-known/matrix` path; the homeserver route is unchanged |
+| Delegated host            | its own `/` path set                                                                      | the catch-all rule on `<fullname>`, hostname in its `hostnames` |
 | Extra hostnames           | `ingress.extraHosts`                                                                      | `gateway.hostnames`                                  |
-| `includeServerName: false` | drops the `server_name` rule and its TLS host, so the apex `/.well-known/matrix` and `/_matrix` paths go with them | drops the `server_name` hostname; refused when that would leave the list empty, since an empty list matches every hostname the listener serves |
+| `includeServerName: false` | drops the `server_name` rule and its TLS host, so the apex `/.well-known/matrix` and `/_matrix` paths go with them | drops the `server_name` hostname and the apex route with it; refused when that would leave the homeserver route's list empty, since an empty list matches every hostname the listener serves |
 | TLS                       | chart-managed: `ingress.tls`, `ingress.tlsSecretName`                                     | the Gateway listener owns TLS and hostname binding   |
 | Class/controller          | `ingress.class` + an IngressClass                                                         | `parentRefs` + a Gateway your controller serves      |
 

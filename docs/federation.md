@@ -172,6 +172,8 @@ spec:
             pathType: Prefix
 ```
 
+The apex rule carries no other path: `https://example.com/` matches nothing here, so the apex root stays free for an object of your own — a second Ingress on the same host, or the apex route the Gateway path renders ([Gateway API](./gateway-api.md#the-apex-route)).
+
 Without `well_known.server`, the same Ingress renders one host and one catch-all path:
 
 ```yaml
@@ -186,22 +188,39 @@ Without `well_known.server`, the same Ingress renders one host and one catch-all
 
 `ingress.extraHosts` get their own rule with `ingress.path`, after the server_name/delegated rules. If `well_known.server` names the same host as `server_name`, you get that host twice — once narrowed, once with `/` — and it appears twice in `tls.hosts` too; that is exactly what the chart's canonical federation fixture renders.
 
-> **Warning:** Enabling delegation narrows what the `server_name` host serves — but both rules on that host are `Prefix` rules, `/.well-known/matrix` and `/_matrix`, so everything underneath them stays routed on the apex host, `/.well-known/matrix/support` and the client API at `/_matrix/client/*` included. What moves to the delegated host's `/` rule is every path outside those two prefixes: `/_tuwunel/server_version`, the admin surface (`/_synapse/admin/*`, `/_synapse/mas/*`), `/.well-known/openid-configuration`, and anything else the server registers at another root. See [Troubleshooting](./troubleshooting.md).
+> **Warning:** Enabling delegation narrows what the `server_name` host serves — but both rules on that host are `Prefix` rules, `/.well-known/matrix` and `/_matrix`, so everything underneath them stays routed on the apex host, `/.well-known/matrix/support` and the client API at `/_matrix/client/*` included. What moves to the delegated host's `/` rule is every path outside those two prefixes: `/_tuwunel/server_version`, the admin surface (`/_synapse/admin/*`, `/_synapse/mas/*`), `/.well-known/openid-configuration`, and anything else the server registers at another root. Setting `serverNameWellKnownOnly: true` takes the second prefix off the apex as well, leaving the discovery documents alone there. See [Troubleshooting](./troubleshooting.md).
+
+**Apex discovery-only.** With `serverNameWellKnownOnly: true` the apex rule keeps only the `/.well-known/matrix` path: the `/_matrix` prefix is not rendered, so the apex serves the discovery documents and nothing else. That is the layout upstream's [root-domain delegation guide](https://matrix-construct.github.io/tuwunel/deploying/root-domain-delegation.html) describes — its Caddy, Nginx and Traefik examples all proxy only `/.well-known/matrix/*` from the apex to the homeserver. The client API and the federation path space stay on the delegated host, and the well-known documents and the apex certificate are unaffected: the apex still resolves here, so it still appears in `tls.hosts`.
+
+```yaml
+# the delegated render above with --set serverNameWellKnownOnly=true
+  rules:
+    - host: example.com
+      http:
+        paths:
+          - path: "/.well-known/matrix"
+            pathType: Prefix
+    - host: matrix.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+```
 
 > **Note:** Both exposure templates read `.Values.config.global.well_known.server` defensively (`get … | default dict`), so a values set that nulls `config.global` renders with either or both enabled — the delegated host is simply treated as absent.
 
-**Apex served elsewhere.** With `includeServerName: false` the chart leaves the `server_name` entry out of every host field it renders: no rule on the apex — so `/.well-known/matrix` and `/_matrix` are not routed there either — no `server_name` in `tls.hosts` and none in `HTTPRoute.hostnames`, while the delegated domain and `ingress.extraHosts`/`gateway.hostnames` keep rendering exactly as above. The identity does not move: `TUWUNEL_SERVER_NAME` and the rendered `config.toml` still carry `server_name`. DNS for the apex then belongs to whatever serves it — upstream's [Option 1: static JSON files](https://matrix-construct.github.io/tuwunel/deploying/root-domain-delegation.html#option-1-static-json-files), where `/.well-known/matrix/client` and `/.well-known/matrix/server` sit next to a site on another host — and only the delegated host and the extra hosts have to resolve to this release.
+**Apex served elsewhere.** With `includeServerName: false` the chart leaves the `server_name` entry out of every host field it renders: no rule on the apex — so `/.well-known/matrix` and `/_matrix` are not routed there either — no `server_name` in `tls.hosts` and none in `HTTPRoute.hostnames`, while the delegated domain and `ingress.extraHosts`/`gateway.hostnames` keep rendering exactly as above. The identity does not move: `TUWUNEL_SERVER_NAME` and the rendered `config.toml` still carry `server_name`. DNS for the apex then belongs to whatever serves it — upstream's [Option 1: static JSON files](https://matrix-construct.github.io/tuwunel/deploying/root-domain-delegation.html#option-1-static-json-files), where `/.well-known/matrix/client` and `/.well-known/matrix/server` sit next to a site on another host — and only the delegated host and the extra hosts have to resolve to this release. The apex has no rule to trim in this layout, so `serverNameWellKnownOnly` is inert here.
 
 Why that layout exists: `ingress.tls` renders one `spec.tls` entry with one secret, so one certificate covers the whole host list. HTTP-01 for a name whose DNS points elsewhere fails its challenge, and one failed authorization fails the order as a whole — the delegated host, whose DNS is right, is left without a certificate too. Taking the apex out of the list is what makes the certificate cover only the hosts that resolve here; the render refuses the value when it would leave an exposure path with no host at all ([Troubleshooting](./troubleshooting.md#a-certificate-that-never-issues)).
 
 ### Gateway API instead of an Ingress
 
-The HTTPRoute carries every hostname the server must answer for — `server_name`, the delegated domain with its port stripped, and `gateway.hostnames` — de-duplicated, behind a single `PathPrefix /` rule. With `server_name: example.com`, `well_known.server: matrix.example.com:443` and `gateway.hostnames: [alias.example.com]`:
+The Gateway path splits the two host roles the same way the Ingress does, into two routes rather than two rules: the delegated domain (with its port stripped) and every `gateway.hostnames` entry form the catch-all route's `hostnames`, while the apex gets a route of its own carrying only the Matrix path set. With `server_name: example.com`, `well_known.server: matrix.example.com:443` and `gateway.hostnames: [alias.example.com]`:
 
 ```yaml
+# <fullname>: the catch-all
 spec:
   hostnames:
-    - example.com
     - matrix.example.com
     - alias.example.com
   rules:
@@ -209,9 +228,21 @@ spec:
         - path:
             type: PathPrefix
             value: /
+# <fullname>-server-name: the apex
+spec:
+  hostnames:
+    - example.com
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /.well-known/matrix
+        - path:
+            type: PathPrefix
+            value: /_matrix
 ```
 
-Unlike the Ingress, there is no narrowed path set: one catch-all rule covers both the delegated paths and everything else. The chart creates no `Gateway` and no `GatewayClass` — exactly as the Ingress does not create its class. See [Gateway API](./gateway-api.md).
+`serverNameWellKnownOnly: true` narrows the apex route to `/.well-known/matrix` alone. Without a delegated domain there is no second route at all: the apex is the homeserver, so it stays on the catch-all route. [Gateway API](./gateway-api.md#the-apex-route) has the object and the reasons, the apex root included. The chart creates no `Gateway` and no `GatewayClass` — exactly as the Ingress does not create its class. See [Gateway API](./gateway-api.md).
 
 ### The DNS alternatives
 
@@ -239,9 +270,10 @@ The chart has exactly one listener: container port `http` = `service.port` (defa
 |---|---|---|---|
 | No delegation | `server_name` | `server_name` | Ingress rule `host: <server_name>`, path `ingress.path` |
 | Delegation (`well_known.server` set) | `server_name` **and** the delegated host | both, in `tls.hosts` | `server_name`: only `/.well-known/matrix` + `/_matrix`; delegated host: `ingress.path` |
+| Delegation with `serverNameWellKnownOnly: true` | `server_name` **and** the delegated host | both, in `tls.hosts` | `server_name`: only `/.well-known/matrix`; delegated host: `ingress.path`; on Gateway API the apex rides its own route, narrowed to that prefix |
 | Delegation with `includeServerName: false` | the delegated host, and each `ingress.extraHosts`/`gateway.hostnames` entry; the apex resolves elsewhere | the delegated host and the extra hosts, in `tls.hosts` | no rule for `server_name` at all: the delegated host and the extra hosts carry `ingress.path`, and the route carries their hostnames |
 | `ingress.extraHosts` | each extra host | each, in `tls.hosts` | own rule, `ingress.path` |
-| Gateway API | every `HTTPRoute` hostname | the Gateway listener's certificates (yours, not the chart's) | one `PathPrefix /` rule |
+| Gateway API | every `HTTPRoute` hostname | the Gateway listener's certificates (yours, not the chart's) | `<fullname>`: one `PathPrefix /`; `<fullname>-server-name` (with delegation): the Matrix path set |
 
 Two rendered details are worth reading off the manifest before you apply it:
 
@@ -339,6 +371,7 @@ If the port-forward answer is correct but the public host is not, the difference
 | `config.global.well_known.server` | unset | Bare `host:port` → `m.server`; also drives the delegated host in the Ingress/HTTPRoute |
 | `config.global.server_name` | unset | Compatibility only; must equal `server_name` |
 | `includeServerName` | `true` | Whether the `server_name` entry is rendered as a host field at all — Ingress rule, `tls.hosts`, HTTPRoute hostnames. `false` is the apex-served-elsewhere layout, which needs another host (delegated domain or extra hostnames) or the render is refused |
+| `serverNameWellKnownOnly` | `false` | Trim the apex to the discovery documents. `true` needs a delegated domain: the Ingress keeps only the `/.well-known/matrix` path on the apex and the Gateway apex route (`<fullname>-server-name`) drops `/_matrix`; `tls.hosts` and the identity are untouched. Inert with `includeServerName: false` |
 | `service.port` | `8080` | The only port; the port federation arrives on |
 | `service.type` / `service.clusterIP` | `ClusterIP` / `"None"` | Headless; exposure comes from an Ingress/route. An override to `NodePort`/`LoadBalancer` installs as configured and renders no `clusterIP` unless you set one |
 | `ingress.enabled` / `class` / `path` / `tls` / `extraHosts` | `false` / `""` / `"/"` / `false` / `[]` | Delegation changes the rules and TLS hosts these render |
@@ -369,13 +402,13 @@ Without a `well_known` block the last table is still rendered, empty — which i
 
 ### Host layout per case
 
-| Rendered object | No delegation | Delegation (`well_known.server` set) | Delegation with `includeServerName: false` |
-|---|---|---|---|
-| Ingress rule for `server_name` | `ingress.path` (`/`) | only `/.well-known/matrix` and `/_matrix` (Prefix) | not rendered |
-| Ingress rule for the delegated host | — | `ingress.path` (`/`) | `ingress.path` (`/`) |
-| `tls.hosts` | `[server_name, ...extraHosts]` | `[server_name, delegated, ...extraHosts]` | `[delegated, ...extraHosts]` |
-| HTTPRoute `hostnames` | `[server_name, ...gateway.hostnames]` | `[server_name, delegated, ...gateway.hostnames]`, de-duplicated | `[delegated, ...gateway.hostnames]`, de-duplicated |
-| HTTPRoute rules | one `PathPrefix /` | one `PathPrefix /` | one `PathPrefix /` |
+| Rendered object | No delegation | Delegation (`well_known.server` set) | Delegation with `includeServerName: false` | Delegation with `serverNameWellKnownOnly: true` |
+|---|---|---|---|---|
+| Ingress rule for `server_name` | `ingress.path` (`/`) | only `/.well-known/matrix` and `/_matrix` (Prefix) | not rendered | only `/.well-known/matrix` (Prefix) |
+| Ingress rule for the delegated host | — | `ingress.path` (`/`) | `ingress.path` (`/`) | `ingress.path` (`/`) |
+| `tls.hosts` | `[server_name, ...extraHosts]` | `[server_name, delegated, ...extraHosts]` | `[delegated, ...extraHosts]` | `[server_name, delegated, ...extraHosts]` |
+| HTTPRoute `hostnames` | `<fullname>`: `[server_name, ...gateway.hostnames]` | `<fullname>`: `[delegated, ...gateway.hostnames]`; `<fullname>-server-name`: `[server_name]` | `<fullname>`: `[delegated, ...gateway.hostnames]` | `<fullname>`: `[delegated, ...gateway.hostnames]`; `<fullname>-server-name`: `[server_name]` |
+| HTTPRoute rules | `<fullname>`: one `PathPrefix /` | `<fullname>`: one `PathPrefix /`; `<fullname>-server-name`: `/.well-known/matrix` + `/_matrix` | `<fullname>`: one `PathPrefix /` | `<fullname>`: one `PathPrefix /`; `<fullname>-server-name`: `/.well-known/matrix` |
 
 ## Common make-mistakes
 
@@ -386,5 +419,6 @@ Without a `well_known` block the last table is still rendered, empty — which i
 | `m.server` is served (or advertised) but nothing federates | Delegation configured without DNS: the delegated host does not resolve to the ingress/Gateway that carries it — or the setting was left on while federation is disabled | [Troubleshooting](./troubleshooting.md) |
 | `/.well-known/matrix/*` answers 404 in one place and 200 in another | Wrong `Host`: the request hit a hostname no Ingress rule or HTTPRoute hostname matches, so the ingress controller answered instead of tuwunel | [Troubleshooting](./troubleshooting.md) |
 | After adding delegation, the apex host stops serving `/_tuwunel/server_version` and admin paths | The delegated branch narrows the `server_name` host's rules to `/.well-known/matrix` and `/_matrix` | [Troubleshooting](./troubleshooting.md) |
+| The apex must answer the discovery documents only, but it also serves `/_matrix` (the client API and the federation path space) | The delegated layout keeps that prefix on the apex on purpose: it is the compatibility net for clients and scripts that address `server_name` directly and skip discovery | [Exposing the homeserver with Ingress](./ingress.md) |
 | Clients find no homeserver although RTC is fully wired | `rtc.enabled` injects `well_known.livekit_url`, never `well_known.client`, so the discovery document still 404s | [Troubleshooting](./troubleshooting.md) |
 | A values file ported from an older release fails to render | `config.global.server_name` or `config.global.port` no longer matches the top-level `server_name` / `service.port` | [Troubleshooting](./troubleshooting.md) |

@@ -1,22 +1,35 @@
 {{- if .Values.gateway.enabled -}}
 {{- $fullName := include "tuwunel.fullname" . -}}
+{{- $wellKnownOnly := .Values.serverNameWellKnownOnly -}}
 {{- $refs := .Values.gateway.parentRefs -}}
 {{- if not $refs -}}
 {{- fail "gateway.enabled needs gateway.parentRefs: the chart renders HTTPRoutes that attach to a Gateway you run, it does not create one" -}}
 {{- end -}}
-{{- /* The hostname list is built from server_name (dropped when
+{{- /* The hostname lists are built from server_name (dropped when
        includeServerName is false), the delegated host and gateway.hostnames.
        The delegated host is derived the same way the Ingress derives it, but
        defensively: `config: {}` is a valid values set, so a missing global or
        well_known block must not abort the render. Every hostname goes through
        tuwunel.host, which drops a Matrix server name's port and refuses a
        scheme - server_name goes through it whether or not it is included, so a
-       scheme in it fails the render either way. */}}
+       scheme in it fails the render either way.
+
+       Two lists come out of this. The homeserver route takes the delegated host
+       and gateway.hostnames with its catch-all; server_name gets a list of its
+       own whenever it is rendered next to a delegated domain, because the CRD
+       has no rule-level hostnames - a path set meant for one hostname needs a
+       route of its own, and on the homeserver route the apex would be reachable
+       through the catch-all that host needs as well. Without a delegated domain
+       there is nothing to split (one host, one catch-all route), and with
+       includeServerName=false the apex is in no route at all. */}}
 {{- $wellKnown := (get (get .Values.config "global" | default dict) "well_known" | default dict) -}}
 {{- $delegated := get $wellKnown "server" -}}
 {{- $serverNameHost := include "tuwunel.host" (dict "value" .Values.server_name "label" "server_name") -}}
 {{- $hostnames := list -}}
-{{- if .Values.includeServerName }}{{ $hostnames = append $hostnames $serverNameHost }}{{ end -}}
+{{- $apexHostnames := list -}}
+{{- if .Values.includeServerName -}}
+{{- if $delegated }}{{ $apexHostnames = append $apexHostnames $serverNameHost }}{{ else }}{{ $hostnames = append $hostnames $serverNameHost }}{{ end -}}
+{{- end -}}
 {{- if $delegated }}{{ $hostnames = append $hostnames (include "tuwunel.host" (dict "value" $delegated "label" "config.global.well_known.server")) }}{{ end -}}
 {{- range .Values.gateway.hostnames }}{{ $hostnames = append $hostnames (include "tuwunel.host" (dict "value" . "label" "gateway.hostnames")) }}{{ end -}}
 {{- /* An empty list is not "no hostnames": the Gateway API matches every
@@ -25,6 +38,16 @@
        deployment never configured. */}}
 {{- if not $hostnames -}}
 {{- fail "includeServerName=false leaves the HTTPRoute without a hostname: server_name is its only hostname unless the delegated domain (config.global.well_known.server) or gateway.hostnames supplies one; a route with an empty hostnames list matches every hostname its listener serves" -}}
+{{- end -}}
+{{- /* serverNameWellKnownOnly narrows the apex route to the discovery prefix,
+       so it needs a delegated domain: without one the apex is the only hostname
+       the exposure has, and dropping /_matrix from the route that serves it
+       would leave the client API unroutable. The Ingress refuses the same
+       values the same way. A delegated domain that is the apex itself (a
+       self-delegation) is not special-cased: its catch-all keeps serving every
+       path, so the two routes still cover the host between them. */}}
+{{- if and $wellKnownOnly (not $delegated) -}}
+{{- fail "serverNameWellKnownOnly=true needs config.global.well_known.server: without a delegated domain the server_name host is the only hostname the route serves, so narrowing it to /.well-known/matrix would leave every other path unroutable" -}}
 {{- end -}}
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -42,8 +65,11 @@ spec:
     {{- toYaml $refs | nindent 4 }}
   hostnames:
     {{- $hostnames | uniq | toYaml | nindent 4 }}
-  {{- /* One catch-all rule: unlike the Ingress, the delegated-domain host does
-         not need a separate path set - the server answers both itself. */}}
+  {{- /* One catch-all rule: the delegated host answers every path the server
+         has, and gateway.hostnames are further names for that same surface.
+         The apex route below is the opposite case - it exists so that host's
+         Matrix paths are claimed without a catch-all, which would swallow
+         everything else the apex serves. */}}
   rules:
     - matches:
         - path:
@@ -52,4 +78,44 @@ spec:
       backendRefs:
         - name: {{ $fullName }}
           port: {{ .Values.service.port }}
+{{- if $apexHostnames }}
+{{- /* The apex host's Matrix surface, on a route of its own: it renders
+       whenever the apex is served next to a delegated domain, and
+       serverNameWellKnownOnly decides how much of it is claimed here - the
+       discovery prefix alone, or that prefix and /_matrix. Never `/`, so the
+       apex root stays free for whatever else serves the apex and attaches its
+       own route there. It reuses gateway.parentRefs and the annotations above -
+       a controller opt-in has to reach every route the chart renders - and
+       carries the homeserver's label set, component label included. */}}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $fullName }}-server-name
+  labels:
+    {{- include "tuwunel.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tuwunel
+  {{- with .Values.gateway.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- toYaml $refs | nindent 4 }}
+  hostnames:
+    {{- $apexHostnames | uniq | toYaml | nindent 4 }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /.well-known/matrix
+        {{- if not $wellKnownOnly }}
+        - path:
+            type: PathPrefix
+            value: /_matrix
+        {{- end }}
+      backendRefs:
+        - name: {{ $fullName }}
+          port: {{ .Values.service.port }}
+{{- end }}
 {{- end }}

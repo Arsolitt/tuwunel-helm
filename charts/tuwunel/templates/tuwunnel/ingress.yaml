@@ -3,6 +3,7 @@
 {{- $servicePort := .Values.service.port -}}
 {{- $ingressPath := .Values.ingress.path -}}
 {{- $includeServerName := .Values.includeServerName -}}
+{{- $wellKnownOnly := .Values.serverNameWellKnownOnly -}}
 {{- /* server_name is a Matrix name and may carry a port (`matrix.example.com:8448`),
        which the host fields below must not - tuwunel.host drops it (and refuses
        a scheme). Normalised once and used for every rule and TLS host. */}}
@@ -25,6 +26,16 @@
        `required` calls below so this names the value that caused it. */}}
 {{- if and (not $includeServerName) (not $delegatedDomain) (not .Values.ingress.extraHosts) }}
 {{- fail "includeServerName=false leaves the Ingress without a hostname: server_name is its only host unless the delegated domain (config.global.well_known.server) or ingress.extraHosts supplies one" }}
+{{- end }}
+{{- /* serverNameWellKnownOnly narrows the apex rule to the discovery path, so
+       it only means something while another host answers the client API there:
+       the delegated domain keeps its full path set, and a delegated domain
+       that is the apex itself (a self-delegation) renders the same paths as
+       before, since that rule keeps serving everything. Left after the guard
+       above, so a values set that trips both is refused for the missing host
+       first. */}}
+{{- if and $wellKnownOnly (not $delegatedDomain) }}
+{{- fail "serverNameWellKnownOnly=true needs config.global.well_known.server: without a delegated domain the server_name host is the only host this Ingress serves, so narrowing it to /.well-known/matrix would leave every other path unroutable" }}
 {{- end }}
 {{- $new := false }}
 {{- if .Capabilities.APIVersions.Has "networking.k8s.io/v1" -}}
@@ -86,6 +97,11 @@ spec:
               serviceName: {{ $fullName }}
               servicePort: {{ $servicePort }}
               {{- end }}
+          {{- /* /_matrix keeps clients and scripts working that talk to
+                 server_name directly instead of reading the discovery
+                 document, so it stays unless serverNameWellKnownOnly asks for
+                 the discovery-only apex. */}}
+          {{- if not $wellKnownOnly }}
           - path: "/_matrix"
             {{- if $new }}
             pathType: Prefix
@@ -100,6 +116,7 @@ spec:
               serviceName: {{ $fullName }}
               servicePort: {{ $servicePort }}
               {{- end }}
+          {{- end }}
     {{- end }}
     {{- /* The catch-all rule is the delegated domain when the deployment answers
            on one, the apex otherwise - and the apex is only there when
