@@ -75,7 +75,7 @@ spec:
 
 - The name is the chart's `<fullname>` helper output: `fullnameOverride` when set, otherwise the release name if it already contains the chart name (or `nameOverride`), otherwise `<release>-<chart>` — `tuwunel` for a release named `tuwunel`.
 - `parentRefs` is emitted verbatim from `gateway.parentRefs` (no defaults injected, no field filtering).
-- `hostnames` is derived, not copied from a single value: `server_name` first, then the delegated domain from `config.global.well_known.server` with any `:port` stripped, then every entry of `gateway.hostnames`. The list is deduplicated, so a delegated host that equals `server_name` (as in the chart's CI fixture `charts/tuwunel/ci/gateway-values.yaml`) shows up once.
+- `hostnames` is derived, not copied from a single value: `server_name` first (unless `includeServerName: false` drops it), then the delegated domain from `config.global.well_known.server` with any `:port` stripped, then every entry of `gateway.hostnames`. The list is deduplicated, so a delegated host that equals `server_name` (as in the chart's CI fixture `charts/tuwunel/ci/gateway-values.yaml`) shows up once.
 - `gateway.annotations` are copied onto the object as-is (controller-specific opt-ins).
 - There is exactly one rule: a single `PathPrefix /` catch-all whose backend is the chart's Service (`<fullname>`) on `service.port` (8080 by default). Unlike the Ingress, the delegated host needs no separate path set — the server answers for both hostnames itself.
 
@@ -178,11 +178,13 @@ Unknown members are allowed here — the field set belongs to Gateway API, not t
 
 Hostnames are derived from three sources, in this order, then deduplicated:
 
-1. `server_name` — always added.
+1. `server_name` — added unless `includeServerName: false` excludes it, which leaves the identity where it is and drops only the route hostname.
 2. the delegated domain from `config.global.well_known.server`, with any `:port` stripped (the [federation delegation](./federation.md) rule the Ingress already follows). Setting only `config.global.well_known.client` adds nothing to the route.
 3. every entry of `gateway.hostnames`.
 
 So `server_name: example.com` plus `config.global.well_known.server: matrix.example.com:8448` plus `gateway.hostnames: [alt.example.com]` renders `[example.com, matrix.example.com, alt.example.com]`.
+
+> **Note:** `includeServerName: false` has to leave another hostname behind. An `HTTPRoute` with an empty `hostnames` list does not match *no* hostname — Gateway API matches such a route for every hostname its listener serves — so the chart refuses the render instead of publishing a route that answers for hosts it was never meant to carry: `includeServerName=false leaves the HTTPRoute without a hostname: server_name is its only hostname unless the delegated domain (config.global.well_known.server) or gateway.hostnames supplies one; a route with an empty hostnames list matches every hostname its listener serves`. A delegated domain that equals `server_name` still counts, because it is rendered from its own value rather than from the identity.
 
 > **Note:** adding a hostname to the route is not enough on its own — the Gateway listener must also serve it. The chart cannot check that, and a listener that does not bind the hostname rejects the route or never matches it.
 
@@ -375,6 +377,7 @@ The two describe the same host differently, so do not compare their manifests 1:
 | `server_name` host        | split into `/.well-known/matrix` and `/_matrix` `Prefix` paths                            | one `PathPrefix /` rule covering everything          |
 | Delegated host            | its own `/` path set                                                                      | the same catch-all rule, hostname added to `hostnames` |
 | Extra hostnames           | `ingress.extraHosts`                                                                      | `gateway.hostnames`                                  |
+| `includeServerName: false` | drops the `server_name` rule and its TLS host, so the apex `/.well-known/matrix` and `/_matrix` paths go with them | drops the `server_name` hostname; refused when that would leave the list empty, since an empty list matches every hostname the listener serves |
 | TLS                       | chart-managed: `ingress.tls`, `ingress.tlsSecretName`                                     | the Gateway listener owns TLS and hostname binding   |
 | Class/controller          | `ingress.class` + an IngressClass                                                         | `parentRefs` + a Gateway your controller serves      |
 
