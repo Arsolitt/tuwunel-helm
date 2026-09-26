@@ -27,6 +27,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `config.toml` keep `server_name`), the delegated domain and `ingress.extraHosts`/`gateway.hostnames`
   render as before, and the render refuses the value when it would leave an exposure path without any
   hostname at all. See [Exposing the homeserver with Ingress](./docs/ingress.md).
+- **A second value, `serverNameWellKnownOnly`, `false` by default, narrows the apex to the discovery
+  prefix.** Set to `true`, the `server_name` host serves only `/.well-known/matrix`: the Ingress rule
+  for the apex drops its `/_matrix` entry, and so does the `<fullname>-server-name` `HTTPRoute`. The
+  default keeps both prefixes, because clients and scripts that address `server_name` directly and
+  skip discovery rely on `/_matrix` being routed there - upstream's root-domain delegation guide
+  proxies only `/.well-known/matrix/*` from the apex. The value needs a delegated domain
+  (`config.global.well_known.server`) and the render refuses it otherwise, because narrowing the only
+  host served would leave the client API unroutable. See
+  [Exposing the homeserver with Ingress](./docs/ingress.md).
+
+### Changed
+
+- **The Gateway API render splits the homeserver across an apex route and a homeserver route.** With a
+  delegated domain set and `includeServerName` true, `<fullname>-server-name` carries the apex with
+  the Matrix paths (`/.well-known/matrix` and `/_matrix`, never `/`) and `<fullname>` keeps the
+  delegated domain and `gateway.hostnames` under its catch-all `/` rule, so the apex root is no
+  longer claimed by the chart and a route of your own can serve it. The Ingress has always described
+  the two hosts that way; the Gateway API render now uses the same host roles. A Gateway API install
+  that served the apex in full - admin paths, `/_tuwunel/*` and RTC control paths were reachable on
+  it through the catch-all - can restore that by listing the apex in `gateway.hostnames`. Without a
+  delegated domain there is one route, and its catch-all still claims `/` on the apex, because the
+  apex is the homeserver then.
 
 ## [2.1.0] - 2026-09-25
 
