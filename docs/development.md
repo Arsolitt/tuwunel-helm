@@ -33,7 +33,7 @@ tuwunel-helm/
 │   ├── values.schema.json         # applied by every helm command
 │   ├── README.md                  # canonical value reference; ships inside the packaged chart
 │   ├── .helmignore                # excludes ci/ - fixtures never ship
-│   ├── ci/                        # 38 fixtures: 13 scenarios, 17 invalid, 8 invalid-render
+│   ├── ci/                        # 41 fixtures: 14 scenarios, 17 invalid, 10 invalid-render
 │   └── templates/
 │       ├── _helpers.tpl           # named templates (labels, fullname, ...)
 │       ├── NOTES.txt              # post-install notes
@@ -64,9 +64,9 @@ Three folders, one meaning each. The folder is the contract: a fixture in the wr
 
 | Folder | What the fixture must do | Owning job | Count |
 |---|---|---|---|
-| `charts/tuwunel/ci/*-values.yaml` | render `helm template` **and** start its image | `lint`, `runtime` | 13 |
+| `charts/tuwunel/ci/*-values.yaml` | render `helm template` **and** start its image | `lint`, `runtime` | 14 |
 | `charts/tuwunel/ci/invalid/*.yaml` | be rejected by `values.schema.json` | `schema` | 17 |
-| `charts/tuwunel/ci/invalid-render/*.yaml` | be rejected by a template `fail`, naming the value in its `# expect-error:` line | `schema` | 8 |
+| `charts/tuwunel/ci/invalid-render/*.yaml` | be rejected by a template `fail`, naming the value in its `# expect-error:` line | `schema` | 10 |
 
 ### Scenarios - `charts/tuwunel/ci/*-values.yaml`
 
@@ -82,6 +82,7 @@ Three folders, one meaning each. The folder is the contract: a fixture in the wr
 | `rtc-pod-network-values.yaml` | LiveKit in pod network mode through a LoadBalancer: single `udp_port` and `externalTrafficPolicy: Local` |
 | `rtc-values.yaml` | RTC enabled with everything the chart derives left unset: no `well_known` block, no `LIVEKIT_URL` / `LIVEKIT_FULL_ACCESS_HOMESERVERS` / `LIVEKIT_JWT_BIND`, no `livekit.config.keys`, no `networkMode` |
 | `scheduled-backup-values.yaml` | Online backups with a per-minute schedule (`* * * * *`), so the runtime job starts the rendered sidecar and lets `crond` fire the job inside its wait window |
+| `server-name-excluded-values.yaml` | An apex served outside the cluster: `includeServerName: false` with a delegated domain and extra hosts on both exposure paths, so the Ingress rules, the `tls.hosts` list and the HTTPRoute hostnames carry the delegated domain and the extra hosts while the `server_name` rule and its host entries disappear |
 | `server-name-with-port-values.yaml` | A Matrix server name that carries a port (`matrix.ci.example:8448`) on both exposure paths at once: the Ingress rules and TLS hosts plus the HTTPRoute hostnames are rendered without the port (the extra host `alias.ci.example:8443` and the gateway hostname `alt.ci.example` go through the same helper), while `TUWUNEL_SERVER_NAME` and `config.toml` keep the configured value |
 | `service-loadbalancer-values.yaml` | The homeserver Service published by a cloud load balancer: `service.type: LoadBalancer` plus `loadBalancerSourceRanges`, which must render without the headless `clusterIP` |
 | `storage-and-backup-values.yaml` | S3-backed media storage plus online backups on the default `0 3 * * *` schedule; the runtime job falls back to the crontab's own signal for this one and expects a backup repository under `backup.path` |
@@ -120,6 +121,8 @@ Not every impossible value is a schema question. Rules that span two values belo
 | `config-port-mismatch.yaml` | `config.global.port` | the statefulset template - it sets `TUWUNEL_PORT` from `service.port`, so an environment variable would win over the file and the server would listen on a port the values file does not name |
 | `gateway-without-parentrefs.yaml` | `gateway.enabled needs gateway.parentRefs` | the gateway HTTPRoute template - the chart renders routes that attach to a Gateway you run, it never creates one |
 | `host-with-scheme.yaml` | `must be a bare hostname` | the `tuwunel.host` helper - the host fields the chart renders (`server_name`, the delegated domain, `ingress.extraHosts`, `gateway.hostnames`) take a bare hostname, so a `://` in the value is refused rather than guessed away |
+| `include-server-name-false-gateway.yaml` | `includeServerName=false leaves the HTTPRoute without a hostname` | the gateway HTTPRoute template - `includeServerName: false` with neither a delegated domain nor `gateway.hostnames` would leave an empty `hostnames` list, which Gateway API matches for every hostname the listener serves |
+| `include-server-name-false-ingress.yaml` | `includeServerName=false leaves the Ingress without a hostname` | the ingress template - the apex rule is the only one unless the delegated domain or `ingress.extraHosts` supplies another, and an Ingress with no rules routes nothing |
 | `rtc-livekit-port-empty.yaml` | `rtc.livekit.config.port` | the livekit service template - one value is the LiveKit container port, the Service port and the backend port of the RTC Ingress and the RTC HTTPRoute, and an empty one renders `port:`/`number:` (null) in all four |
 | `rtc-media-route-without-pod-mode.yaml` | `networkMode=pod` | the udproute template - in hostNetwork mode the media ports are node ports no Service fronts |
 | `rtc-pod-udp-range.yaml` | `rtc.livekit.config.rtc.udp_port` | the livekit service template - a Kubernetes Service cannot expose a UDP port range |

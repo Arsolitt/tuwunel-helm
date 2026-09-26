@@ -2,6 +2,7 @@
 {{- $fullName := include "tuwunel.fullname" . -}}
 {{- $servicePort := .Values.service.port -}}
 {{- $ingressPath := .Values.ingress.path -}}
+{{- $includeServerName := .Values.includeServerName -}}
 {{- /* server_name is a Matrix name and may carry a port (`matrix.example.com:8448`),
        which the host fields below must not - tuwunel.host drops it (and refuses
        a scheme). Normalised once and used for every rule and TLS host. */}}
@@ -17,6 +18,13 @@
 {{- /* A host field, so the port the delegated domain may carry is dropped:
        tuwunel.host owns that normalisation for every host this chart renders. */}}
 {{- $delegatedDomain = include "tuwunel.host" (dict "value" $isDelegatedDomain "label" "config.global.well_known.server") }}
+{{- end }}
+{{- /* With the apex excluded and nothing else supplying a host, every rule and
+       TLS entry below is empty - an Ingress the API server accepts and no
+       request ever matches. Refused here rather than rendered, and before the
+       `required` calls below so this names the value that caused it. */}}
+{{- if and (not $includeServerName) (not $delegatedDomain) (not .Values.ingress.extraHosts) }}
+{{- fail "includeServerName=false leaves the Ingress without a hostname: server_name is its only host unless the delegated domain (config.global.well_known.server) or ingress.extraHosts supplies one" }}
 {{- end }}
 {{- $new := false }}
 {{- if .Capabilities.APIVersions.Has "networking.k8s.io/v1" -}}
@@ -44,7 +52,9 @@ spec:
   {{- if .Values.ingress.tls }}
   tls:
     - hosts:
+        {{- if $includeServerName }}
         - {{ $serverNameHost }}
+        {{- end }}
         {{- /* config.global.well_known.server is empty on a non-delegated
                install, so an unguarded entry here renders a null host and the
                API server refuses the Ingress with
@@ -58,7 +68,7 @@ spec:
       secretName: {{ .Values.ingress.tlsSecretName | default (printf "%s-tls" $fullName) }}
   {{- end }}
   rules:
-    {{- if $isDelegatedDomain }}
+    {{- if and $isDelegatedDomain $includeServerName }}
     - host: {{ $serverNameHost }}
       http:
         paths:
@@ -91,6 +101,10 @@ spec:
               servicePort: {{ $servicePort }}
               {{- end }}
     {{- end }}
+    {{- /* The catch-all rule is the delegated domain when the deployment answers
+           on one, the apex otherwise - and the apex is only there when
+           includeServerName renders it. */}}
+    {{- if or $isDelegatedDomain $includeServerName }}
     {{- if $isDelegatedDomain }}
     - host: {{ $delegatedDomain }}
     {{- else }}
@@ -112,6 +126,7 @@ spec:
               serviceName: {{ $fullName }}
               servicePort: {{ $servicePort }}
               {{- end }}
+    {{- end }}
     {{- range .Values.ingress.extraHosts }}
     - host: {{ include "tuwunel.host" (dict "value" . "label" "ingress.extraHosts") }}
       http:

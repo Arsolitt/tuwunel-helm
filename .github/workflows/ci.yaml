@@ -253,6 +253,95 @@ jobs:
           done
           echo "no empty hosts in any render"
 
+      # No schema can see this one: includeServerName is a plain boolean and
+      # server_name a plain string, and the same values are valid with either
+      # boolean - only the combination decides which hosts reach the manifest.
+      # Both directions are asserted on the render instead. The chart's
+      # both-paths fixture has to carry the normalised server_name in every host
+      # field, so a condition that dropped the entry everywhere cannot pass; the
+      # excluded fixture has to carry it in none while the delegated host stays
+      # in all three, so the exclusion cannot pass by rendering an empty list.
+      - name: The server_name host is rendered unless it is excluded
+        run: |
+          set -euo pipefail
+          included="${RUNNER_TEMP}/tuwunel-server-name-included.yaml"
+          excluded="${RUNNER_TEMP}/tuwunel-server-name-excluded.yaml"
+          check() {
+            local label="$1" manifest="$2"
+            shift 2
+            helm template ci "$CHART_DIR" "$@" > "$manifest"
+            echo "rendered $label"
+          }
+          check "ci/server-name-with-port-values.yaml" "$included" \
+            -f "$CHART_DIR/ci/server-name-with-port-values.yaml"
+          check "ci/server-name-excluded-values.yaml" "$excluded" \
+            -f "$CHART_DIR/ci/server-name-excluded-values.yaml"
+          python3 - "$included" "$excluded" <<'PY'
+          import sys
+          import yaml
+
+          included, excluded = sys.argv[1], sys.argv[2]
+
+
+          def host_fields(path):
+              """The host fields the chart renders, the same way the step above
+              reads them: Ingress rule hosts and TLS hosts, Gateway API route
+              hostnames."""
+              rules, tls, hostnames = [], [], []
+              for doc in yaml.safe_load_all(open(path)):
+                  if not isinstance(doc, dict):
+                      continue
+                  kind, spec = doc.get("kind"), doc.get("spec") or {}
+                  if kind == "Ingress":
+                      rules += [(rule or {}).get("host") for rule in spec.get("rules") or []]
+                      for entry in spec.get("tls") or []:
+                          tls += (entry or {}).get("hosts") or []
+                  elif kind in ("HTTPRoute", "UDPRoute", "TCPRoute"):
+                      hostnames += spec.get("hostnames") or []
+              return rules, tls, hostnames
+
+
+          failures = []
+
+
+          def require(condition, message):
+              if not condition:
+                  failures.append(message)
+
+
+          # server-name-with-port-values.yaml: server_name carries a port, so
+          # the entry that has to reach every host field is the normalised one.
+          rules, tls, hostnames = host_fields(included)
+          require("matrix.ci.example" in rules,
+                  "ci/server-name-with-port-values.yaml: the normalised server_name is in no Ingress rule host")
+          require("matrix.ci.example" in tls,
+                  "ci/server-name-with-port-values.yaml: the normalised server_name is in no Ingress TLS host list")
+          require("matrix.ci.example" in hostnames,
+                  "ci/server-name-with-port-values.yaml: the normalised server_name is in no HTTPRoute hostname list")
+
+          # server-name-excluded-values.yaml: the apex in none of the three, the
+          # delegated host in all three.
+          rules, tls, hostnames = host_fields(excluded)
+          require("ci.example" not in rules,
+                  "ci/server-name-excluded-values.yaml: includeServerName=false still renders ci.example in an Ingress rule host")
+          require("ci.example" not in tls,
+                  "ci/server-name-excluded-values.yaml: includeServerName=false still renders ci.example in an Ingress TLS host list")
+          require("ci.example" not in hostnames,
+                  "ci/server-name-excluded-values.yaml: includeServerName=false still renders ci.example in an HTTPRoute hostname list")
+          require("matrix.ci.example" in rules,
+                  "ci/server-name-excluded-values.yaml: the delegated host is in no Ingress rule host")
+          require("matrix.ci.example" in tls,
+                  "ci/server-name-excluded-values.yaml: the delegated host is in no Ingress TLS host list")
+          require("matrix.ci.example" in hostnames,
+                  "ci/server-name-excluded-values.yaml: the delegated host is in no HTTPRoute hostname list")
+
+          for failure in failures:
+              print(f"::error::{failure}")
+          if failures:
+              sys.exit(1)
+          PY
+          echo "server_name is rendered unless includeServerName excludes it"
+
       # An immutable field cannot be seen in a single render: `spec.selector` of
       # a workload accepts the chart-version label the same way it accepts any
       # other, and only the *next* chart release discovers that the API server

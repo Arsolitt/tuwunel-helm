@@ -4,16 +4,28 @@
 {{- if not $refs -}}
 {{- fail "gateway.enabled needs gateway.parentRefs: the chart renders HTTPRoutes that attach to a Gateway you run, it does not create one" -}}
 {{- end -}}
-{{- /* The delegated host is derived the same way the Ingress derives it, but
+{{- /* The hostname list is built from server_name (dropped when
+       includeServerName is false), the delegated host and gateway.hostnames.
+       The delegated host is derived the same way the Ingress derives it, but
        defensively: `config: {}` is a valid values set, so a missing global or
        well_known block must not abort the render. Every hostname goes through
        tuwunel.host, which drops a Matrix server name's port and refuses a
-       scheme. */}}
+       scheme - server_name goes through it whether or not it is included, so a
+       scheme in it fails the render either way. */}}
 {{- $wellKnown := (get (get .Values.config "global" | default dict) "well_known" | default dict) -}}
 {{- $delegated := get $wellKnown "server" -}}
-{{- $hostnames := list (include "tuwunel.host" (dict "value" .Values.server_name "label" "server_name")) -}}
+{{- $serverNameHost := include "tuwunel.host" (dict "value" .Values.server_name "label" "server_name") -}}
+{{- $hostnames := list -}}
+{{- if .Values.includeServerName }}{{ $hostnames = append $hostnames $serverNameHost }}{{ end -}}
 {{- if $delegated }}{{ $hostnames = append $hostnames (include "tuwunel.host" (dict "value" $delegated "label" "config.global.well_known.server")) }}{{ end -}}
 {{- range .Values.gateway.hostnames }}{{ $hostnames = append $hostnames (include "tuwunel.host" (dict "value" . "label" "gateway.hostnames")) }}{{ end -}}
+{{- /* An empty list is not "no hostnames": the Gateway API matches every
+       hostname the listener serves, the opposite of excluding one - so the
+       render refuses it rather than emitting a route that claims hosts the
+       deployment never configured. */}}
+{{- if not $hostnames -}}
+{{- fail "includeServerName=false leaves the HTTPRoute without a hostname: server_name is its only hostname unless the delegated domain (config.global.well_known.server) or gateway.hostnames supplies one; a route with an empty hostnames list matches every hostname its listener serves" -}}
+{{- end -}}
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:

@@ -13,6 +13,21 @@ of the version; its heading date is the day the section was opened.
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.2.0] - 2026-09-26
+
+### Added
+
+- **A new `includeServerName` value, `true` by default, keeps `server_name` out of the host fields the
+  chart renders.** Set it to `false` when the apex is served outside the cluster - static
+  `/.well-known/matrix/client` and `/.well-known/matrix/server` documents next to a site on another
+  host - because the chart otherwise puts `server_name` into the Ingress rules, the `spec.tls` host
+  list and the `HTTPRoute` hostnames. A certificate is requested for every host in that list under a
+  single secret, so a name whose DNS points elsewhere fails its challenge and the certificate is not
+  issued for the delegated domain either. The identity does not move (`TUWUNEL_SERVER_NAME` and
+  `config.toml` keep `server_name`), the delegated domain and `ingress.extraHosts`/`gateway.hostnames`
+  render as before, and the render refuses the value when it would leave an exposure path without any
+  hostname at all. See [Exposing the homeserver with Ingress](./docs/ingress.md).
+
 ## [2.1.0] - 2026-09-25
 
 ### Added

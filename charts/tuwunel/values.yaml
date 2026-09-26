@@ -3,6 +3,17 @@
 ## You probably want this to be your apex domain.
 server_name: "yourdomain.com"
 
+## Render the server_name host into the host fields: the Ingress rule and its
+## TLS host, and the HTTPRoute hostname. Set it to `false` when the apex domain
+## is served elsewhere - its /.well-known/matrix/client and
+## /.well-known/matrix/server documents are static files on another host, so its
+## DNS does not point here and it can never pass a certificate challenge, while
+## the one certificate also covers the delegated host that does resolve here.
+## The identity does not move: TUWUNEL_SERVER_NAME and the rendered config.toml
+## keep server_name either way. Do not set it to `false` without another host:
+## the render refuses an Ingress or an HTTPRoute left without one.
+includeServerName: true
+
 ## Matrix RTC (Element Call) example (for quick reference).
 ## Uncomment and modify as needed:
 # rtc:

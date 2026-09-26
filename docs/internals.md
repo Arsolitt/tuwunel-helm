@@ -148,8 +148,8 @@ Every value the chart fills in is additive-only. Each injection is guarded by `h
 
 Two layouts are derived rather than defaulted, and both matter as soon as you delegate a domain:
 
-- **Ingress hosts.** When `config.global.well_known.server` is set, the chart strips its `:port` suffix and uses the result as the delegated domain. The `server_name` host is then narrowed to `/.well-known/matrix` and `/_matrix`, while the delegated host serves `ingress.path`, and `ingress.extraHosts` are appended. The TLS host list is `server_name` + delegated domain + `ingress.extraHosts`. See [Ingress](./ingress.md) and [Federation and delegation](./federation.md).
-- **Gateway hostnames.** The HTTPRoute hostnames are `server_name` + the delegated domain + `gateway.hostnames`, deduplicated with `uniq`, and the route has a single catch-all rule — no per-path host list. See [Gateway API](./gateway-api.md).
+- **Ingress hosts.** When `config.global.well_known.server` is set, the chart strips its `:port` suffix and uses the result as the delegated domain. The `server_name` host is then narrowed to `/.well-known/matrix` and `/_matrix` — dropped altogether when `includeServerName: false` — while the delegated host serves `ingress.path`, and `ingress.extraHosts` are appended. The TLS host list is `server_name` + delegated domain + `ingress.extraHosts`. See [Ingress](./ingress.md) and [Federation and delegation](./federation.md).
+- **Gateway hostnames.** The HTTPRoute hostnames are `server_name` + the delegated domain + `gateway.hostnames`, with `server_name` left out when `includeServerName: false`, deduplicated with `uniq`, and the route has a single catch-all rule — no per-path host list. See [Gateway API](./gateway-api.md).
 
 `service.port` is propagated as well: it is the Service port, the container port, `TUWUNEL_PORT`, every Ingress and HTTPRoute backend, and the URL the test hook calls. It is the only port knob in the chart.
 
@@ -271,7 +271,7 @@ Each row was checked against the rendered output of the CI scenarios and against
 | No CRDs and no `crds/` directory | `charts/tuwunel/` contains only `Chart.yaml`, `.helmignore`, `README.md`, `values.yaml`, `values.schema.json`, `ci/` and `templates/` |
 | No Gateway or GatewayClass | The Gateway API templates render only `HTTPRoute`, `TCPRoute` and `UDPRoute`; attaching to a Gateway you run is the contract ([Gateway API](./gateway-api.md)) |
 | No database bootstrap Job, no wait-for-database init container | The pod has exactly one init container (`config-processor`) and it never mounts the data volume; the server migrates itself on first start, which is what the startup probe budget covers |
-| No NetworkPolicy | No `NetworkPolicy` (and no PodDisruptionBudget, HPA, ServiceAccount/RBAC, ServiceMonitor or Job) appears in any of the twelve scenario renders |
+| No NetworkPolicy | No `NetworkPolicy` (and no PodDisruptionBudget, HPA, ServiceAccount/RBAC, ServiceMonitor or Job) appears in any of the fourteen scenario renders |
 | No high availability | `replicas` is hardcoded to `1` on the StatefulSet and both RTC Deployments; the release notes warn that scaling the StatefulSet risks quiet data corruption, and nothing in the chart stops two writers on one RocksDB directory |
 | No validation of the configuration *contents* | `config` is a free-form object; a nested mapping where upstream wants an array of tables — `config.global.identity_provider` written as a YAML mapping — passes `helm lint` and renders `[global.identity_provider]`, and stops the server at startup instead ([Troubleshooting](./troubleshooting.md), [Configuring the server](./configuration.md)) |
 

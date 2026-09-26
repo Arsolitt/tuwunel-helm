@@ -91,6 +91,7 @@ The following tables list the configurable parameters of the tuwunel chart and t
 | Parameter                          | Description                                                                                 | Default                            |
 | ---------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------- |
 | `server_name`                      | Server name (your Matrix domain)                                                            | `yourdomain.com`                   |
+| `includeServerName`                | Whether the host fields derived from `server_name` are rendered (Ingress, TLS, HTTPRoute)   | `true`                             |
 | `image.repository`                 | Image repository                                                                            | `ghcr.io/matrix-construct/tuwunel` |
 | `image.tag`                        | Image tag; needs v1.9.0 or newer for the chart's env and probe contract                      | `v1.9.3`                           |
 | `image.pullPolicy`                 | Image pull policy                                                                           | `IfNotPresent`                     |
@@ -101,6 +102,21 @@ The following tables list the configurable parameters of the tuwunel chart and t
 | `busybox.image.tag`                | busybox tag (has to stay multi-arch)                                                        | `1.37`                             |
 | `busybox.image.pullPolicy`         | busybox pull policy                                                                         | `IfNotPresent`                     |
 | `imagePullSecrets`                 | Pull secrets for every pod the chart creates                                                | `[]`                               |
+
+`includeServerName: false` takes `server_name` out of the host fields the chart renders: the Ingress
+rule and its TLS host, and the `HTTPRoute` hostname. Set it to `false` when the apex is served
+elsewhere - the upstream-documented "Option 1: static JSON files", where
+`/.well-known/matrix/client` and `/.well-known/matrix/server` sit next to a site on another host - so
+the apex resolves to that site rather than to the cluster and can never answer an ACME challenge.
+The chart renders one `spec.tls` entry with one secret, so cert-manager issues a single certificate
+covering `server_name`, the delegated domain and the extra hosts; a name that cannot complete its
+challenge leaves the whole certificate unissued - the delegated host included. The identity does not
+move: `TUWUNEL_SERVER_NAME` and `config.toml` keep `server_name`, and the delegated domain,
+`ingress.extraHosts` and `gateway.hostnames` still render. The render refuses the value when it
+would leave an Ingress or an `HTTPRoute` without a hostname: an Ingress with an empty `rules` list
+routes nothing, and a route with an empty `hostnames` list matches every hostname its listener
+serves. See
+[Exposing the homeserver with Ingress](https://github.com/Arsolitt/tuwunel-helm/blob/main/docs/ingress.md).
 
 `dibi/envsubst:1` is published for `linux/amd64` only. On an arm64 node either point
 `initContainer.image` at a multi-arch (or mirrored) equivalent or pin the pod to an amd64 node;
@@ -253,9 +269,12 @@ being ignored (see [Upgrading to 2.0.0](#upgrading-to-200)).
 `ingress.tls: true` adds one `spec.tls` entry covering every hostname the rules serve:
 `server_name`, the delegated domain from `config.global.well_known.server` when one is set, and
 `ingress.extraHosts`. A delegated domain is not required for TLS - without one the list is
-`server_name` plus the extra hosts - and the certificate has to cover each name (through
-cert-manager annotations issuing it, for example). Setting `ingress.extraHosts` adds a hostname to
-both the rules and that list.
+`server_name` plus the extra hosts (with `includeServerName: false`, just the extra hosts) - and the
+certificate has to cover each name (through cert-manager annotations issuing it, for example).
+Setting `ingress.extraHosts` adds a hostname to both the rules and that list. With
+`includeServerName: false` the `server_name` rule and its host in that list are dropped, while the
+delegated domain and `ingress.extraHosts` stay; a render whose rules would be empty is refused
+instead of applied with nothing to route.
 
 Every host field the chart renders goes through the same normalisation: a trailing `:port` is
 stripped from `server_name`, `ingress.extraHosts`, `gateway.hostnames` and the delegated domain,
@@ -278,7 +297,10 @@ a cutover.
 The homeserver route is named `<fullname>` and carries every hostname the server has to answer for:
 `server_name`, the delegated domain from `config.global.well_known.server` and
 `gateway.hostnames`, each through the same host normalisation the Ingress uses - a trailing `:port`
-is stripped and a scheme fails the render - so a route hostname is always a bare hostname. A single
+is stripped and a scheme fails the render - so a route hostname is always a bare hostname. With
+`includeServerName: false` the `server_name` hostname is dropped, while the delegated domain and
+`gateway.hostnames` stay; a render that would leave the list empty is refused, because a route with
+an empty `hostnames` list matches every hostname its listener serves. A single
 catch-all `PathPrefix /` rule points at `<fullname>:service.port`; with both hostnames listed, one
 rule covers what the Ingress splits into separate path sets.
 
