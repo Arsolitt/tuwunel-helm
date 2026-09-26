@@ -14,6 +14,20 @@ server_name: "yourdomain.com"
 ## the render refuses an Ingress or an HTTPRoute left without one.
 includeServerName: true
 
+## Serve only the discovery documents from the server_name host: its Ingress
+## rule keeps /.well-known/matrix and loses /_matrix, and the route the chart
+## renders for that host - the apex one, next to the route for the delegated
+## domain - keeps the same single prefix. Set it when the apex resolves to this
+## cluster but should answer nothing beyond delegation: the delegation examples
+## upstream proxy only /.well-known/matrix/* from the apex, while the delegated
+## domain serves the client API. The default is the wider rule because a client
+## or a script that talks to server_name directly, skipping discovery, would
+## lose the client API otherwise. It needs a delegated domain
+## (config.global.well_known.server): without one, server_name is the only host
+## the exposure serves, so narrowing it would leave every other path unroutable
+## and the render refuses it.
+serverNameWellKnownOnly: false
+
 ## Matrix RTC (Element Call) example (for quick reference).
 ## Uncomment and modify as needed:
 # rtc:

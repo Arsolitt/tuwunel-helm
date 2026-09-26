@@ -1,0 +1,18 @@
+# MUST fail the render (not the schema): serverNameWellKnownOnly: true narrows
+# the server_name hostname to /.well-known/matrix, and with no delegated domain
+# - config.global.well_known.server is unset here - that hostname is the only
+# one the exposure serves. There is no second route to move it to and nothing
+# left to keep serving the client API, so the template refuses the render rather
+# than emit a route whose other paths no client can reach.
+# gateway.parentRefs is set so this guard is what refuses it, rather than the
+# guard that asks for a Gateway to attach to.
+#
+# expect-error: serverNameWellKnownOnly=true needs config.global.well_known.server
+server_name: ci.example
+
+serverNameWellKnownOnly: true
+
+gateway:
+  enabled: true
+  parentRefs:
+    - name: ci-gateway

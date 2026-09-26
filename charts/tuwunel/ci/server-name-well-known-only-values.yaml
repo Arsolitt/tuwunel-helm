@@ -1,0 +1,42 @@
+# Scenario: the apex resolves to this cluster but should answer nothing beyond
+# the delegation documents - the layout the upstream delegation guide describes,
+# where the proxy in front of the apex forwards /.well-known/matrix/* and the
+# rest of the domain belongs to whatever else serves it.
+#
+# Two things are visible here. The chart renders a route for the apex host
+# whenever it serves that host next to a delegated domain - with or without
+# serverNameWellKnownOnly - because the two host roles have different path sets;
+# this value only narrows the apex one, from /.well-known/matrix and /_matrix
+# down to /.well-known/matrix alone. Neither shape claims `/` on the apex: the
+# root stays free for a route the operator attaches for whatever else the apex
+# serves, and the Ingress rule is built the same way.
+#
+# The value is opt-in because the default keeps /_matrix: a client or a script
+# that talks to server_name directly, skipping discovery, would lose the client
+# API otherwise. matrix.ci.example - the delegated domain - keeps the catch-all
+# on both exposure paths.
+#
+# Exactly two hostnames are configured here - no ingress.extraHosts and no
+# gateway.hostnames - which is what lets the CI step assert that the apex is on
+# the apex route alone and the delegated host on the homeserver route.
+server_name: ci.example
+
+serverNameWellKnownOnly: true
+
+config:
+  global:
+    allow_federation: true
+    well_known:
+      client: https://matrix.ci.example
+      server: matrix.ci.example:443
+
+ingress:
+  enabled: true
+  class: nginx
+  tls: true
+
+gateway:
+  enabled: true
+  parentRefs:
+    - name: ci-gateway
+      sectionName: https

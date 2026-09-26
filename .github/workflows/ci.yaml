@@ -342,6 +342,160 @@ jobs:
           PY
           echo "server_name is rendered unless includeServerName excludes it"
 
+      # No schema can express this either: serverNameWellKnownOnly is a plain
+      # boolean and both layouts are valid manifests - the same Ingress accepts
+      # a rule with one path or two, and a Gateway accepts both routes either
+      # way - so only the value decides which one is rendered. The fixture is
+      # rendered both ways and each layout asserted on the render, so a
+      # condition that dropped /_matrix everywhere, or that let the apex route
+      # claim the apex root, has to fail here.
+      - name: The apex serves only the well-known documents when it is narrowed
+        run: |
+          set -euo pipefail
+          fixture="$CHART_DIR/ci/server-name-well-known-only-values.yaml"
+          narrowed="${RUNNER_TEMP}/tuwunel-well-known-only.yaml"
+          widened="${RUNNER_TEMP}/tuwunel-well-known-wide.yaml"
+          helm template ci "$CHART_DIR" -f "$fixture" > "$narrowed"
+          helm template ci "$CHART_DIR" -f "$fixture" --set serverNameWellKnownOnly=false > "$widened"
+          python3 - "$narrowed" "$widened" <<'PY'
+          import sys
+          import yaml
+
+          narrowed, widened = sys.argv[1], sys.argv[2]
+          fixture = "ci/server-name-well-known-only-values.yaml"
+          APEX = "ci.example"
+          DELEGATED = "matrix.ci.example"
+          DISCOVERY = "/.well-known/matrix"
+
+
+          def docs(path):
+              """The rendered objects, in the order the chart emits them."""
+              return [doc for doc in yaml.safe_load_all(open(path)) if isinstance(doc, dict)]
+
+
+          def ingress_paths(manifests, host):
+              """The path set of the rule that serves one host."""
+              for doc in manifests:
+                  if doc.get("kind") != "Ingress":
+                      continue
+                  for rule in (doc.get("spec") or {}).get("rules") or []:
+                      if rule.get("host") == host:
+                          return [path.get("path") for path in ((rule.get("http") or {}).get("paths") or [])]
+              return None
+
+
+          def service(manifests):
+              """The name and port of the Service every route points at."""
+              for doc in manifests:
+                  if doc.get("kind") == "Service":
+                      ports = (doc.get("spec") or {}).get("ports") or []
+                      if ports:
+                          return (doc.get("metadata", {}).get("name"), ports[0].get("port"))
+              return None
+
+
+          def routes(manifests):
+              """Every HTTPRoute with its hostnames, the path matches of its
+              rules and the backends those rules point at."""
+              found = []
+              for doc in manifests:
+                  if doc.get("kind") != "HTTPRoute":
+                      continue
+                  spec = doc.get("spec") or {}
+                  matches, backends = [], []
+                  for rule in spec.get("rules") or []:
+                      for match in rule.get("matches") or []:
+                          path = match.get("path") or {}
+                          matches.append((path.get("type"), path.get("value")))
+                      for ref in rule.get("backendRefs") or []:
+                          backends.append((ref.get("name"), ref.get("port")))
+                  found.append({
+                      "name": doc.get("metadata", {}).get("name"),
+                      "hostnames": spec.get("hostnames") or [],
+                      "matches": matches,
+                      "backends": backends,
+                  })
+              return found
+
+
+          failures = []
+
+
+          def require(condition, message):
+              if not condition:
+                  failures.append(f"{fixture}: {message}")
+
+
+          # The narrowed layout: one path on the apex rule, the catch-all intact
+          # on the delegated host, and the apex on a route of its own - off the
+          # homeserver route, and claiming no root path on either exposure.
+          manifests = docs(narrowed)
+          backend = service(manifests)
+          require(backend is not None, "the render has no Service to check the route backends against")
+          service_name = backend[0] if backend else ""
+          apex_paths = ingress_paths(manifests, APEX)
+          require(apex_paths == [DISCOVERY], f"the apex Ingress rule renders {apex_paths} instead of {[DISCOVERY]}")
+          delegated_paths = ingress_paths(manifests, DELEGATED)
+          require(delegated_paths == ["/"], f"the delegated host does not keep its catch-all Ingress rule ({delegated_paths})")
+          found = routes(manifests)
+          require(len(found) == 2, f"the render has {len(found)} HTTPRoutes, expected the homeserver route and the apex route")
+          apex_routes = [route for route in found if APEX in route["hostnames"]]
+          require(len(apex_routes) == 1, f"the apex is in {len(apex_routes)} route hostname lists, expected the apex route alone")
+          if len(apex_routes) == 1:
+              apex_route = apex_routes[0]
+              require(apex_route["name"] == f"{service_name}-server-name",
+                      f"the apex is on {apex_route['name']} instead of {service_name}-server-name")
+              require(apex_route["matches"] == [("PathPrefix", DISCOVERY)],
+                      f"{apex_route['name']} matches {apex_route['matches']} instead of PathPrefix {DISCOVERY} alone")
+              require(("PathPrefix", "/") not in apex_route["matches"],
+                      f"{apex_route['name']} claims the apex root, which the split leaves to whatever else serves the apex")
+              require(bool(apex_route["backends"]) and all(entry == backend for entry in apex_route["backends"]),
+                      f"{apex_route['name']} does not point at {backend}")
+          main_routes = [route for route in found if APEX not in route["hostnames"]]
+          require(len(main_routes) == 1,
+                  f"{len(main_routes)} routes serve the delegated host, expected the homeserver route alone")
+          if len(main_routes) == 1:
+              require(main_routes[0]["hostnames"] == [DELEGATED],
+                      f"the homeserver route lists {main_routes[0]['hostnames']} instead of {[DELEGATED]}")
+              require(main_routes[0]["matches"] == [("PathPrefix", "/")],
+                      f"the homeserver route matches {main_routes[0]['matches']} instead of PathPrefix / alone")
+              require(bool(main_routes[0]["backends"]) and all(entry == backend for entry in main_routes[0]["backends"]),
+                      f"{main_routes[0]['name']} does not point at {backend}")
+
+          # The same fixture with the value off: the apex route exists either
+          # way, only its path set changes - so a condition that dropped
+          # /_matrix everywhere cannot render this.
+          manifests = docs(widened)
+          apex_paths = ingress_paths(manifests, APEX)
+          require(apex_paths is not None and set(apex_paths) == {DISCOVERY, "/_matrix"},
+                  f"with serverNameWellKnownOnly=false the apex Ingress rule renders {apex_paths}: the discovery path and /_matrix are both expected")
+          found = routes(manifests)
+          require(len(found) == 2, f"with serverNameWellKnownOnly=false the render has {len(found)} HTTPRoutes, expected both")
+          apex_routes = [route for route in found if APEX in route["hostnames"]]
+          require(len(apex_routes) == 1,
+                  f"with serverNameWellKnownOnly=false the apex is in {len(apex_routes)} route hostname lists, expected the apex route alone")
+          if len(apex_routes) == 1:
+              matches = apex_routes[0]["matches"]
+              require(set(matches) == {("PathPrefix", DISCOVERY), ("PathPrefix", "/_matrix")},
+                      f"with serverNameWellKnownOnly=false {apex_routes[0]['name']} matches {matches}: the discovery path and /_matrix are both expected")
+              require(("PathPrefix", "/") not in matches,
+                      f"with serverNameWellKnownOnly=false {apex_routes[0]['name']} claims the apex root, which the split leaves to whatever else serves the apex")
+          main_routes = [route for route in found if APEX not in route["hostnames"]]
+          require(len(main_routes) == 1,
+                  f"with serverNameWellKnownOnly=false {len(main_routes)} routes serve the delegated host, expected the homeserver route alone")
+          if len(main_routes) == 1:
+              require(main_routes[0]["hostnames"] == [DELEGATED],
+                      f"with serverNameWellKnownOnly=false the homeserver route lists {main_routes[0]['hostnames']} instead of {[DELEGATED]}")
+              require(main_routes[0]["matches"] == [("PathPrefix", "/")],
+                      f"with serverNameWellKnownOnly=false the homeserver route matches {main_routes[0]['matches']} instead of PathPrefix / alone")
+
+          for failure in failures:
+              print(f"::error::{failure}")
+          if failures:
+              sys.exit(1)
+          PY
+          echo "the apex serves the well-known documents alone when it is narrowed"
+
       # An immutable field cannot be seen in a single render: `spec.selector` of
       # a workload accepts the chart-version label the same way it accepts any
       # other, and only the *next* chart release discovers that the API server
