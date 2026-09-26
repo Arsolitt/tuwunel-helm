@@ -33,14 +33,14 @@ tuwunel-helm/
 │   ├── values.schema.json         # applied by every helm command
 │   ├── README.md                  # canonical value reference; ships inside the packaged chart
 │   ├── .helmignore                # excludes ci/ - fixtures never ship
-│   ├── ci/                        # 41 fixtures: 14 scenarios, 17 invalid, 10 invalid-render
+│   ├── ci/                        # 44 fixtures: 15 scenarios, 17 invalid, 12 invalid-render
 │   └── templates/
 │       ├── _helpers.tpl           # named templates (labels, fullname, ...)
 │       ├── NOTES.txt              # post-install notes
 │       ├── backup-crontabs.yaml   # crontab ConfigMap for the scheduled-backup sidecar
 │       ├── pvc-data.yaml          # data volume claim
 │       ├── pvc-backup.yaml        # backup repository claim
-│       ├── gateway/httproute.yaml # homeserver HTTPRoute (Gateway API exposure)
+│       ├── gateway/httproute.yaml # homeserver and apex HTTPRoutes (Gateway API exposure)
 │       ├── rtc/                   # livekit + jwt workloads, configmap, services, ingress, http/udp/tcp routes
 │       ├── tests/test-connection.yaml  # the `helm test` hook: the only file named *test*
 │       └── tuwunnel/              # configmap, statefulset, service, ingress
@@ -64,9 +64,9 @@ Three folders, one meaning each. The folder is the contract: a fixture in the wr
 
 | Folder | What the fixture must do | Owning job | Count |
 |---|---|---|---|
-| `charts/tuwunel/ci/*-values.yaml` | render `helm template` **and** start its image | `lint`, `runtime` | 14 |
+| `charts/tuwunel/ci/*-values.yaml` | render `helm template` **and** start its image | `lint`, `runtime` | 15 |
 | `charts/tuwunel/ci/invalid/*.yaml` | be rejected by `values.schema.json` | `schema` | 17 |
-| `charts/tuwunel/ci/invalid-render/*.yaml` | be rejected by a template `fail`, naming the value in its `# expect-error:` line | `schema` | 10 |
+| `charts/tuwunel/ci/invalid-render/*.yaml` | be rejected by a template `fail`, naming the value in its `# expect-error:` line | `schema` | 12 |
 
 ### Scenarios - `charts/tuwunel/ci/*-values.yaml`
 
@@ -83,6 +83,7 @@ Three folders, one meaning each. The folder is the contract: a fixture in the wr
 | `rtc-values.yaml` | RTC enabled with everything the chart derives left unset: no `well_known` block, no `LIVEKIT_URL` / `LIVEKIT_FULL_ACCESS_HOMESERVERS` / `LIVEKIT_JWT_BIND`, no `livekit.config.keys`, no `networkMode` |
 | `scheduled-backup-values.yaml` | Online backups with a per-minute schedule (`* * * * *`), so the runtime job starts the rendered sidecar and lets `crond` fire the job inside its wait window |
 | `server-name-excluded-values.yaml` | An apex served outside the cluster: `includeServerName: false` with a delegated domain and extra hosts on both exposure paths, so the Ingress rules, the `tls.hosts` list and the HTTPRoute hostnames carry the delegated domain and the extra hosts while the `server_name` rule and its host entries disappear |
+| `server-name-well-known-only-values.yaml` | A delegated install that wants the apex to be a discovery endpoint only: `serverNameWellKnownOnly: true` on both exposure paths, so the Ingress apex rule keeps only `/.well-known/matrix` and the Gateway apex route drops `/_matrix`, while the delegated catch-all, the extra hosts, the TLS hosts and the homeserver route stay as they are |
 | `server-name-with-port-values.yaml` | A Matrix server name that carries a port (`matrix.ci.example:8448`) on both exposure paths at once: the Ingress rules and TLS hosts plus the HTTPRoute hostnames are rendered without the port (the extra host `alias.ci.example:8443` and the gateway hostname `alt.ci.example` go through the same helper), while `TUWUNEL_SERVER_NAME` and `config.toml` keep the configured value |
 | `service-loadbalancer-values.yaml` | The homeserver Service published by a cloud load balancer: `service.type: LoadBalancer` plus `loadBalancerSourceRanges`, which must render without the headless `clusterIP` |
 | `storage-and-backup-values.yaml` | S3-backed media storage plus online backups on the default `0 3 * * *` schedule; the runtime job falls back to the crontab's own signal for this one and expects a backup repository under `backup.path` |
@@ -126,6 +127,8 @@ Not every impossible value is a schema question. Rules that span two values belo
 | `rtc-livekit-port-empty.yaml` | `rtc.livekit.config.port` | the livekit service template - one value is the LiveKit container port, the Service port and the backend port of the RTC Ingress and the RTC HTTPRoute, and an empty one renders `port:`/`number:` (null) in all four |
 | `rtc-media-route-without-pod-mode.yaml` | `networkMode=pod` | the udproute template - in hostNetwork mode the media ports are node ports no Service fronts |
 | `rtc-pod-udp-range.yaml` | `rtc.livekit.config.rtc.udp_port` | the livekit service template - a Kubernetes Service cannot expose a UDP port range |
+| `server-name-well-known-only-gateway.yaml` | `serverNameWellKnownOnly=true needs config.global.well_known.server` | the gateway HTTPRoute template - the apex route carries the apex alone, so with no delegated domain to hand the rest of the paths to, narrowing it to `/.well-known/matrix` would leave every other path unroutable |
+| `server-name-well-known-only-ingress.yaml` | `serverNameWellKnownOnly=true needs config.global.well_known.server` | the ingress template - the apex rule is the only rule there, so narrowing it to `/.well-known/matrix` would leave every other path unroutable |
 | `well-known-server-with-scheme.yaml` | `config.global.well_known.server must be a bare host:port, not a URL` | the configmap template - the key is written into `config.toml` and served as `m.server`, so a URL is wrong however the release is exposed; the exposure templates refuse it only when they render it as a host field, and this fixture enables neither |
 
 ### Adding a fixture

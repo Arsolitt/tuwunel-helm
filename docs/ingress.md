@@ -113,7 +113,7 @@ ingress:
 `ingress.class` is documented with an empty default, but an empty value cannot be used:
 
 ```text
-Error: execution error at (tuwunel/templates/tuwunnel/ingress.yaml:50:23): If ingress.enabled is set to true, ingress.class is required
+Error: execution error at (tuwunel/templates/tuwunnel/ingress.yaml:61:23): If ingress.enabled is set to true, ingress.class is required
 ```
 
 The template wraps the value in `required`, so name the class your controller watches (`nginx`, `traefik`, …). The complete value list is in the [chart README § Ingress Configuration](../charts/tuwunel/README.md#ingress-configuration).
@@ -165,7 +165,7 @@ spec:
 A scheme cannot be normalised that way, so it is refused instead: there is nothing to strip, and guessing the host behind `https://` would put a name in the manifest that appears nowhere in the values. The render fails naming the value and the label it came from — `server_name`, `ingress.extraHosts` or `gateway.hostnames` (a scheme in `config.global.well_known.server` is refused one step earlier, by the [ConfigMap guard](./troubleshooting.md#rejected-at-render-time-template-guards) that runs on every install, with its own message):
 
 ```text
-Error: execution error at (tuwunel/templates/tuwunnel/ingress.yaml:9:23): server_name must be a bare hostname, not a URL: "https://matrix.ci.example"
+Error: execution error at (tuwunel/templates/tuwunnel/ingress.yaml:10:23): server_name must be a bare hostname, not a URL: "https://matrix.ci.example"
 ```
 
 > **Note:** With an empty `ingress.annotations` the template still emits an `annotations:` key with nothing under it, so the rendered manifest carries `metadata.annotations: null`. It is cosmetic, but it shows up in diffs.
@@ -179,6 +179,8 @@ Error: execution error at (tuwunel/templates/tuwunnel/ingress.yaml:9:23): server
 3. every `ingress.extraHosts` entry.
 
 All three are the normalised hosts from [What the chart renders](#what-the-chart-renders): a trailing `:port` is stripped from each of them, so no port reaches a host — or the certificate's SNI name — and a scheme fails the render. The list is **not** deduplicated, so delegating to your own `server_name` renders that host twice. The secret name is `ingress.tlsSecretName`, or `<fullname>-tls` when the value is empty.
+
+`serverNameWellKnownOnly` does not touch this list: the apex still resolves to this Ingress, which is why the chart serves it at all, so it keeps its place in `spec.tls.hosts` and the certificate has to cover it. The value only shrinks the paths its rule carries (see [Serving the Matrix hostnames](#serving-the-matrix-hostnames)).
 
 ```yaml
 ingress:
@@ -208,7 +210,7 @@ spec:
 
 ## Serving the Matrix hostnames
 
-The layout depends on two values: `config.global.well_known.server`, which decides whether the chart splits the two host roles, and `includeServerName`, which decides whether the apex entry is rendered at all. Setting only `config.global.well_known.client` changes nothing in the Ingress.
+The layout depends on three values: `config.global.well_known.server`, which decides whether the chart splits the two host roles, `includeServerName`, which decides whether the apex entry is rendered at all, and `serverNameWellKnownOnly`, which trims the apex rule to the discovery documents. Setting only `config.global.well_known.client` changes nothing in the Ingress.
 
 **No delegation** (`well_known.server` unset) — one catch-all rule on `server_name`, which serves everything: the client API, the well-known documents and the federation endpoints alike.
 
@@ -217,6 +219,7 @@ The layout depends on two values: `config.global.well_known.server`, which decid
 | Host | Paths | Purpose |
 | --- | --- | --- |
 | `server_name` | `/.well-known/matrix` and `/_matrix` (Prefix) | The documents that tell peers and clients where the server actually lives, plus the federation path space |
+| `server_name` with `serverNameWellKnownOnly: true` | `/.well-known/matrix` (Prefix) | The documents alone; the client API and the federation path space stay on the delegated host |
 | delegated domain | `ingress.path` (`/`) | The catch-all: every other API path |
 | each `ingress.extraHosts` entry | `ingress.path` (`/`) | Same catch-all on an alias host |
 
@@ -271,9 +274,102 @@ spec:
                   number: 8080
 ```
 
-> **Warning:** Enabling delegation is not additive. Any path on the `server_name` host outside `/.well-known/matrix*` and `/_matrix*` matches no rule of this Ingress — including `/_tuwunel/server_version`, the RTC endpoints and admin paths. Those belong on the delegated host, or on a host you add through `ingress.extraHosts`. If RTC is involved, add its own routing ([Matrix RTC with LiveKit](./rtc.md)).
+**The apex root is free.** The apex rule carries only the two Matrix prefixes, so nothing in this Ingress claims `https://example.com/`: a request for the root — or for any path outside the prefixes — matches no rule on that host, which is what lets you attach an object of your own for it. A second Ingress on the apex coexists with this one:
 
-**Apex served elsewhere** (`includeServerName: false`) — the chart leaves the `server_name` entry out of every host field it renders, so there is no apex rule at all: no `/.well-known/matrix` and no `/_matrix` paths on the apex, and no apex entry in `spec.tls` either. The delegated domain and every `ingress.extraHosts` entry keep the catch-all rule, and the identity does not move — `TUWUNEL_SERVER_NAME` and the rendered `config.toml` still carry `server_name`. The apex then has to be answered by whatever serves that host: `/.well-known/matrix/client` and `/.well-known/matrix/server` as static files, upstream's [Option 1: static JSON files](https://matrix-construct.github.io/tuwunel/deploying/root-domain-delegation.html#option-1-static-json-files), and its DNS record belongs to that host rather than to this Ingress. Rendering `server_name: example.com` with `includeServerName: false`, `config.global.well_known.server: "matrix.example.com:443"` and `ingress.extraHosts: [alias.example.com]` produces:
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: apex-site
+spec:
+  ingressClassName: "nginx"
+  rules:
+    - host: example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: apex-site
+                port:
+                  number: 80
+```
+
+Whether two Ingress objects for the same host are merged into one rule set is the controller's behaviour — ingress-nginx merges them, and some controllers refuse the second object — while on the Gateway API side you attach your own `HTTPRoute` to the same listener ([Exposing the homeserver with Gateway API](./gateway-api.md#the-apex-route)). Without delegation there is nothing to share: the single apex rule is the catch-all, so the root belongs to the homeserver.
+
+**Apex discovery-only** (`serverNameWellKnownOnly: true`) — the apex rule keeps only the `/.well-known/matrix` path; `/_matrix` is not rendered, so the apex serves the discovery documents and nothing else. This is the layout upstream's [root-domain delegation guide](https://matrix-construct.github.io/tuwunel/deploying/root-domain-delegation.html) describes, whose Caddy, Nginx and Traefik examples all proxy only `/.well-known/matrix/*` from the apex to the homeserver. The delegated catch-all rule, every `ingress.extraHosts` rule and the whole `spec.tls` host list are unchanged: the apex resolves to this Ingress — that is why the chart serves it at all — so it keeps its place in `spec.tls.hosts` and its certificate.
+
+```yaml
+server_name: "example.com"
+serverNameWellKnownOnly: true
+
+ingress:
+  enabled: true
+  class: nginx
+  tls: true
+  extraHosts:
+    - alias.example.com
+
+config:
+  global:
+    well_known:
+      server: "matrix.example.com:443"
+```
+
+Rendering that with the release name `ingress-demo` produces the delegated Ingress above with one path fewer on the apex:
+
+```yaml
+spec:
+  ingressClassName: "nginx"
+  tls:
+    - hosts:
+        - example.com
+        - matrix.example.com
+        - alias.example.com
+      secretName: ingress-demo-tuwunel-tls
+  rules:
+    - host: example.com
+      http:
+        paths:
+          - path: "/.well-known/matrix"
+            pathType: Prefix
+            backend:
+              service:
+                name: ingress-demo-tuwunel
+                port:
+                  number: 8080
+    - host: matrix.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ingress-demo-tuwunel
+                port:
+                  number: 8080
+    - host: alias.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ingress-demo-tuwunel
+                port:
+                  number: 8080
+```
+
+What the value gives up is the `/_matrix` prefix on the apex: the compatibility net for clients and scripts that address `server_name` directly and skip discovery, and the federation path space on that host. Neither is routed there any more, so a client or a peer that insists on the apex finds no client API and no federation endpoints — those live on the delegated host, and the well-known documents, still served here, are what point at it. The apex certificate is unaffected for the same reason it is needed at all: the host list did not move.
+
+> **Note:** the path is `/.well-known/matrix` without a trailing slash, deliberately. `pathType: Prefix` matches on path element boundaries, so `/.well-known/matrix/` would stop matching the bare `/.well-known/matrix` path that probes and clients request before they append `/client` or `/server`.
+
+A delegated domain equal to `server_name` is not special-cased. The two rules then land on the same host: the apex rule narrows to the documents and the delegated catch-all keeps serving `/_matrix` and everything else, so the effective result is the same as with the value off.
+
+> **Warning:** Enabling delegation is not additive. Any path on the `server_name` host outside `/.well-known/matrix*` and `/_matrix*` matches no rule of this Ingress — including `/_tuwunel/server_version`, the RTC endpoints and admin paths. Those belong on the delegated host, or on a host you add through `ingress.extraHosts`. Setting `serverNameWellKnownOnly: true` takes the `/_matrix` prefix off that host as well, so the apex routes the documents alone. If RTC is involved, add its own routing ([Matrix RTC with LiveKit](./rtc.md)).
+
+**Apex served elsewhere** (`includeServerName: false`) — the chart leaves the `server_name` entry out of every host field it renders, so there is no apex rule at all: no `/.well-known/matrix` and no `/_matrix` paths on the apex, and no apex entry in `spec.tls` either. The delegated domain and every `ingress.extraHosts` entry keep the catch-all rule, and the identity does not move — `TUWUNEL_SERVER_NAME` and the rendered `config.toml` still carry `server_name`. The apex then has to be answered by whatever serves that host: `/.well-known/matrix/client` and `/.well-known/matrix/server` as static files, upstream's [Option 1: static JSON files](https://matrix-construct.github.io/tuwunel/deploying/root-domain-delegation.html#option-1-static-json-files), and its DNS record belongs to that host rather than to this Ingress. With no apex rule rendered there is nothing for `serverNameWellKnownOnly` to trim, so the value is inert in this layout. Rendering `server_name: example.com` with `includeServerName: false`, `config.global.well_known.server: "matrix.example.com:443"` and `ingress.extraHosts: [alias.example.com]` produces:
 
 ```yaml
 spec:
@@ -382,4 +478,6 @@ Creating the first account is a registration concern, not an ingress one — see
 | Everything worked until delegation was switched on; now other endpoints on the apex host return no route / 404 | [Delegation narrowed the server_name host](./troubleshooting.md#delegation-narrowed-the-server-name-host) |
 | Requests fail with `500 M_UNKNOWN` / `Can't extract client IP from configured ip_source`, or every client has the same IP in the logs | [Client IP and ip_source](./troubleshooting.md#client-ip-and-ip_source) |
 | A certificate never issues (`Order`/`Certificate` stuck or failing on the apex), or `helm install` aborts with `includeServerName=false leaves the Ingress without a hostname` | [A certificate that never issues](./troubleshooting.md#a-certificate-that-never-issues) |
+| The apex should answer the discovery documents only, but it also serves `/_matrix` (the client API and the federation path space) | [Delegation narrowed the server_name host](./troubleshooting.md#delegation-narrowed-the-server-name-host) |
+| The render stops with `serverNameWellKnownOnly=true needs config.global.well_known.server: …` | [Rejected at render time (template guards)](./troubleshooting.md#rejected-at-render-time-template-guards) |
 | Peers or clients cannot find the server at all, well-known documents missing | [Exposure and federation](./troubleshooting.md#exposure-and-federation) |
