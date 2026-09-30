@@ -110,6 +110,13 @@ Rules that keep this honest:
   the only thing that creates one. Nothing in the tree is bumped to publish: the version is stamped
   into the package with `helm package --version` and recorded on `main` afterwards in a
   `chore(release): record <tag> [skip ci]` commit.
+- The tag names the commit below the release job's own record commits, never the record commit: a
+  `chore(release): record <tag> [skip ci]` tip carries a skip token, and GitHub creates no run at
+  all for a push whose head commit carries one - a tag cut there releases nothing, silently.
+  `hack/release.sh` prints `stepping past <sha> (<subject>)` as it walks back to the commit the
+  release was cut from, and refuses, exit 1, a commit whose skip token is there for any other
+  reason (`[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`, `[actions skip]`, a `skip-checks:`
+  trailer): stepping over it would leave its content out of the release.
 - `hack/runtime-check.sh` reads its images, env, paths and probes out of the render. If it needs to
   know something the manifests do not say, that is a bug in the manifests.
 - `hack/selector-check.py` is the gate that keeps `spec.selector` applyable: no selector, on a
