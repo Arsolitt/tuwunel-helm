@@ -19,7 +19,7 @@
 # Those three run on pull requests, on pushes to main and on release tags: a tag
 # is released by the same gates the branch is held to.
 #
-#   release-tag  runs on a `release-*` tag: the version is either
+#   release-tag  runs on a `v<version>` tag: the version is either
 #                `<major>.<minor>.<patch>` (the stable track) or
 #                `<major>.<minor>.<patch>-rc.<n>` (the release candidate track),
 #                the CHANGELOG.md section the release body comes from has to
@@ -43,7 +43,7 @@ on:
     branches:
       - main
     tags:
-      - 'release-*'
+      - 'v[0-9]*'
 
 permissions:
   contents: read
@@ -788,8 +788,9 @@ jobs:
       #
       # `cr` looks the release up *by tag*, and the tag it looks for is the
       # release-name template it is given: its default is `<chart name>-<version>`
-      # (`tuwunel-<version>`), which is not the tag this repository pushes. The
-      # template therefore names the prefix the same way `hack/release.sh` does.
+      # (`tuwunel-<version>`), which is not the tag this repository pushes
+      # (`v<version>`). The template therefore names the prefix the same way
+      # `hack/release.sh` does.
       - name: Publish the chart repository index
         env:
           CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -799,7 +800,7 @@ jobs:
           repo="${GITHUB_REPOSITORY#*/}"
           mkdir -p .cr-index
           cr index -o "$owner" -r "$repo" \
-            --release-name-template 'release-{{ .Version }}' \
+            --release-name-template 'v{{ .Version }}' \
             --push
 
       # The tag is the source of truth, so the branch records the release after

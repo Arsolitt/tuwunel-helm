@@ -16,8 +16,8 @@
 # section of CHANGELOG.md - write the section for the version you will ship,
 # then cut candidates of it.
 #
-# The tag is `release-<version>`; `<version>` may be given with or without the
-# prefix (`release-2.1.0-rc.1`), because the release job passes
+# The tag is `v<version>`; `<version>` may be given with or without the
+# prefix (`v2.1.0-rc.1`), because the release job passes
 # `$GITHUB_REF_NAME` straight through.
 #
 # --check prints, on stdout and only on success, the four facts the release job
@@ -26,7 +26,7 @@
 #   version=2.1.0-rc.1
 #   channel=rc
 #   section=2.1.0
-#   tag=release-2.1.0-rc.1
+#   tag=v2.1.0-rc.1
 #
 # Checks, in order - each one exits before anything is created:
 #   1. the version has one of the two shapes above;
@@ -62,10 +62,10 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(dirname -- "$script_dir")"
 
-# The tag prefix - `release-<version>`. It has to match the `on.push.tags`
+# The tag prefix - `v<version>`. It has to match the `on.push.tags`
 # filter in .github/workflows/ci.yaml, which is what turns a pushed tag into a
 # release at all.
-tag_prefix="release-"
+tag_prefix="v"
 
 check=false
 if [ "${1:-}" = "--check" ]; then
@@ -74,7 +74,7 @@ if [ "${1:-}" = "--check" ]; then
 fi
 
 if [ "$#" -ne 1 ] || [ -z "${1:-}" ]; then
-  echo "usage: hack/release.sh [--check] <version>   (e.g. 2.1.0, 2.1.0-rc.1 or release-2.1.0-rc.1)" >&2
+  echo "usage: hack/release.sh [--check] <version>   (e.g. 2.1.0, 2.1.0-rc.1 or v2.1.0-rc.1)" >&2
   exit 2
 fi
 
@@ -132,9 +132,12 @@ fi
 # The commit the tag names: past the release job's own record commits, and never
 # one that carries a workflow-skip token. Both are explained in the header -
 # briefly, a tag on a `[skip ci]` commit releases nothing at all, because GitHub
-# creates no run for a push whose head commit carries the token.
+# creates no run for a push whose head commit carries the token. Record commits
+# of the prefix used before `v` (`release-`) are stepped past too, so a release
+# cut while a legacy record commit is still the tip names the commit below it
+# the same way.
 target="$(git -C "$repo_root" rev-parse HEAD)"
-while [[ "$(git -C "$repo_root" show -s --format=%s "$target")" =~ ^chore\(release\):\ record\ release- ]]; do
+while [[ "$(git -C "$repo_root" show -s --format=%s "$target")" =~ ^chore\(release\):\ record\ (v[0-9]|release-) ]]; do
   echo "stepping past $(git -C "$repo_root" rev-parse --short "$target") ($(git -C "$repo_root" show -s --format=%s "$target"))"
   parent="$(git -C "$repo_root" rev-parse --quiet --verify "${target}^")" || parent=""
   if [ -z "$parent" ]; then

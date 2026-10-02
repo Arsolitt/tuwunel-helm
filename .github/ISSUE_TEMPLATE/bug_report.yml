@@ -25,7 +25,7 @@ body:
     attributes:
       label: Chart version
       description: From `helm list -n <namespace>` (CHART column) or the release tag.
-      placeholder: release-2.0.2
+      placeholder: v2.2.0
     validations:
       required: true
 

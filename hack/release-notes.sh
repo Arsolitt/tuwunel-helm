@@ -27,15 +27,15 @@
 #      release whose body silently stayed the chart description;
 #   2. print the section;
 #   3. append the `**Full Changelog**: <compare URL>` line when the repository,
-#      the `release-<version>` tag and a previous `release-*` tag are all
-#      resolvable. The previous tag follows the release's own track - a
-#      candidate compares against the tag that preceded it, a stable release
-#      against the previous stable one, so its compare range is the whole line
-#      and not just what changed since the last candidate. The tags of the prefix
-#      used before `release-` are releases of this chart too, so the first tag of
-#      the new prefix compares against the newest of them. That part is best
-#      effort: any of them missing just means the section is printed alone,
-#      still with exit 0.
+#      the `v<version>` tag and a previous `v*` tag are all resolvable. The
+#      previous tag follows the release's own track - a candidate compares
+#      against the tag that preceded it, a stable release against the previous
+#      stable one, so its compare range is the whole line and not just what
+#      changed since the last candidate. The tags of the prefixes used before
+#      `v` (`release-`, and `tuwunel-` before that) are releases of this chart
+#      too, so the first tag of the new prefix compares against the newest tag
+#      of the newest non-empty one. That part is best effort: any of them
+#      missing just means the section is printed alone, still with exit 0.
 #
 # usage: hack/release-notes.sh <version> [<section-version>]   (e.g. 2.0.0, or
 #                                              2.1.0-rc.1 2.1.0 for a candidate)
@@ -55,14 +55,15 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(dirname -- "$script_dir")"
 
-# The tag prefix - `release-<version>`. `hack/release.sh` pushes the same string,
+# The tag prefix - `v<version>`. `hack/release.sh` pushes the same string,
 # and the `on.push.tags` filter in .github/workflows/ci.yaml is what turns a
 # pushed tag into a release at all.
-tag_prefix="release-"
-# The prefix the release tags used before this one. Those tags are releases of
-# this chart as well, so they are the previous release for the first tag of the
-# new prefix - the only thing this constant is used for.
-legacy_tag_prefix="tuwunel-"
+tag_prefix="v"
+# The prefixes the release tags used before `v`, newest first - `release-`, and
+# `tuwunel-` before that. Those tags are releases of this chart as well, so the
+# newest tag of the newest non-empty one is the previous release for the first
+# tag of the new prefix - the only thing this list is used for.
+legacy_tag_prefixes=("release-" "tuwunel-")
 
 if [ "$#" -lt 1 ] || [ "$#" -gt 2 ] || [ -z "$1" ]; then
   echo "usage: hack/release-notes.sh <version> [<section-version>]   (e.g. 2.0.0, or 2.1.0-rc.1 2.1.0 for a candidate)" >&2
@@ -160,11 +161,24 @@ if [ -n "$repo" ] && [ -n "$tag" ]; then
     ' <<<"$tags")"
   fi
   # The first release under this prefix has no predecessor wearing it: the newest
-  # tag of the prefix used before is the previous release. No pipe here - `head`
-  # would end the pipeline early and `pipefail` would turn that into a failure.
+  # tag of the newest prefix used before is the previous release, matched to the
+  # released version's own track like the lookup above. No pipe to `head` here -
+  # it would end the pipeline early and `pipefail` would turn that into a failure.
   if [ -z "$previous" ]; then
-    legacy_tags="$(git -C "$repo_root" tag --list "${legacy_tag_prefix}*" --sort=-v:refname 2>/dev/null || true)"
-    previous="${legacy_tags%%$'\n'*}"
+    for prefix in "${legacy_tag_prefixes[@]}"; do
+      legacy_tags="$(git -C "$repo_root" tag --list "${prefix}*" --sort=-v:refname 2>/dev/null || true)"
+      if [ -n "$legacy_tags" ]; then
+        # A stable release does not compare against a candidate, even when that
+        # is the newest tag of the legacy prefix.
+        previous="$(awk -v skip_pre="$skip_prereleases" -v prefix="$prefix" '
+          skip_pre == 1 { candidate = $0; sub("^" prefix, "", candidate); if (candidate ~ /-/) next }
+          { print; exit }
+        ' <<<"$legacy_tags")"
+        if [ -n "$previous" ]; then
+          break
+        fi
+      fi
+    done
   fi
 fi
 

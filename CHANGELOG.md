@@ -5,8 +5,9 @@ version is published as that GitHub release's body by the `release` job in
 `.github/workflows/ci.yaml`.
 
 Versions come from the git tag, not from a hand-edited `Chart.yaml`: the tag is
-`release-<version>`, where `<version>` is either a stable release (`2.1.0`) or a
-release candidate (`2.1.0-rc.1`). The section published is `## [<version>]` - a
+`v<version>`, where `<version>` is either a stable release (`2.1.0`) or a
+release candidate (`2.1.0-rc.1`); earlier releases used `release-*` tags, and
+`tuwunel-*` before that. The section published is `## [<version>]` - a
 candidate publishes the section of the version it is a candidate of, so
 `2.1.0-rc.1` publishes `## [2.1.0]`. Write the section before cutting the first tag
 of the version; its heading date is the day the section was opened.

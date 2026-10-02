@@ -71,14 +71,14 @@ helm package charts/tuwunel
   TOML type (`allow_federation = "false"` makes tuwunel exit 1 at startup) or a readiness path
   that answers 403 in the default federation-disabled configuration; the other jobs check
   manifest shape only and never read the rendered config file.
-- `release-tag` - a `push` of a `release-*` tag only, and it runs before the gates. It resolves the
+- `release-tag` - a `push` of a `v<version>` tag only, and it runs before the gates. It resolves the
   release with `hack/release.sh --check "$GITHUB_REF_NAME"` - the same script that cuts the tag, so
   the shape rules cannot drift - and refuses a tag that is not an ancestor of `origin/main`. A
   version is either `<major>.<minor>.<patch>` (stable) or `<major>.<minor>.<patch>-rc.<n>` (release
   candidate); anything else, and a missing `## [<version>]` CHANGELOG section, fails here in seconds
   instead of after the ~25-minute `runtime` gate. It publishes `version`, `channel`, `section` and
   `tag` as job outputs.
-- `release` - a `push` of a `release-*` tag only, `needs: [release-tag, lint, schema, runtime]`,
+- `release` - a `push` of a `v<version>` tag only, `needs: [release-tag, lint, schema, runtime]`,
   `concurrency: chart-release`. It packages the tagged tree itself with `helm package --version`
   (the tag carries the version; the tree still records the previous release), reads the package back
   to prove its `Chart.yaml` carries that version, then creates the GitHub release with
@@ -86,7 +86,7 @@ helm package charts/tuwunel
   `hack/release-notes.sh "$VERSION" "$SECTION"`, the package is the uploaded asset, and the track is
   the flag - `--prerelease --latest=false` for a candidate, `--latest` for a stable release (a
   pre-release has to be born one: `cr` cannot create it, and an unflagged candidate is one consumers
-  see as stable). Then `cr index` - given `--release-name-template 'release-{{ .Version }}'`, because that template is the tag it looks the release up by - `--push` rewrites `index.yaml` on `gh-pages`; the pinned `cr` comes
+  see as stable). Then `cr index` - given `--release-name-template 'v{{ .Version }}'`, because that template is the tag it looks the release up by - `--push` rewrites `index.yaml` on `gh-pages`; the pinned `cr` comes
   from `chart-releaser-action@v1.7.0` with `install_only: true`, because the action's own release
   path packages "charts changed since the previous tag" and its script dies on an unbound variable
   when packaging is skipped (fixed on its `main`, unreleased). Finally it commits
@@ -105,10 +105,12 @@ Rules that keep this honest:
   A fixture in the wrong folder makes the job that owns it fail, not pass.
 - The chart defaults are a supported configuration, so `lint` renders and validates them next to
   the fixtures - the release job packages the tagged tree as-is, so the defaults are what users get.
-- A release is a pushed tag of one of two shapes - `release-<major>.<minor>.<patch>` (stable) or
-  `release-<major>.<minor>.<patch>-rc.<n>` (release candidate) - and `hack/release.sh <version>` is
-  the only thing that creates one. Nothing in the tree is bumped to publish: the version is stamped
-  into the package with `helm package --version` and recorded on `main` afterwards in a
+- A release is a pushed tag of one of two shapes - `v<major>.<minor>.<patch>` (stable) or
+  `v<major>.<minor>.<patch>-rc.<n>` (release candidate) - and `hack/release.sh <version>` is
+  the only thing that creates one. Releases before the `v` convention carry `release-*` tags
+  (2.1.0 through 2.2.0, candidates included); releases up to 2.0.2 carry `tuwunel-*` tags.
+  Nothing in the tree is bumped to publish: the version is stamped into the package with
+  `helm package --version` and recorded on `main` afterwards in a
   `chore(release): record <tag> [skip ci]` commit.
 - The tag names the commit below the release job's own record commits, never the record commit: a
   `chore(release): record <tag> [skip ci]` tip carries a skip token, and GitHub creates no run at
