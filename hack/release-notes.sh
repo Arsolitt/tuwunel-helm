@@ -34,8 +34,9 @@
 #      changed since the last candidate. The tags of the prefixes used before
 #      `v` (`release-`, and `tuwunel-` before that) are releases of this chart
 #      too, so the first tag of the new prefix compares against the newest tag
-#      of the newest non-empty one. That part is best effort: any of them
-#      missing just means the section is printed alone, still with exit 0.
+#      of its own track in the newest non-empty one. That part is best effort:
+#      any of them missing just means the section is printed alone, still with
+#      exit 0.
 #
 # usage: hack/release-notes.sh <version> [<section-version>]   (e.g. 2.0.0, or
 #                                              2.1.0-rc.1 2.1.0 for a candidate)
