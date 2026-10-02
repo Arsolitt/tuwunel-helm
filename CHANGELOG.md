@@ -14,6 +14,16 @@ of the version; its heading date is the day the section was opened.
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.2.1] - 2026-10-02
+
+### Changed
+
+- **A release tag is `v<version>` now.** `hack/release.sh <version>` cuts the tag exactly as before,
+  but under the `v` prefix (for example `v2.2.1`) instead of `release-<version>`; the workflow's tag
+  filter, the compare link in the release notes and the documentation moved with it. The earlier
+  releases keep their `release-*` tags, and the chart repository index serves both. Nothing in the
+  chart itself changed: no template, value or default is different from 2.2.0.
+
 ## [2.2.0] - 2026-09-26
 
 ### Added
