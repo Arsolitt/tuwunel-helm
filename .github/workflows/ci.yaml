@@ -32,7 +32,8 @@
 #                tag version's `## [<version>]` CHANGELOG.md section (a
 #                candidate uses the section of the version it is a candidate of
 #                and is flagged pre-release), and main then records the version
-#                in Chart.yaml.
+#                in Chart.yaml. The packaged chart is also pushed to GHCR as an
+#                OCI artifact (`packages: write`, `oci://ghcr.io/<owner>/charts`).
 #
 # Tool pins live in `env:` below; Dependabot keeps the actions themselves fresh.
 name: CI
@@ -686,6 +687,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: write
     # One release at a time: two tags pushed close together would otherwise race
     # on the same branch, and the loser fails on a non-fast-forward push after
     # its release already exists.
@@ -803,6 +805,30 @@ jobs:
             --release-name-template 'v{{ .Version }}' \
             --push
 
+      # The same package the release asset came from is pushed to GHCR as an
+      # OCI artifact: `helm push` stamps the chart's own name and version onto
+      # <registry>/<owner>/charts, so the ref consumers install is
+      # oci://ghcr.io/<owner>/charts/<chart>. GHCR requires a lowercase
+      # repository path and the owner may not be lowercase (this one is not),
+      # so it is lowercased here. A re-run re-pushes identical bytes; the
+      # manifest digest is derived from the package, so the tag is replaced by
+      # the same manifest.
+      - name: Publish the chart to GHCR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.release-tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          chart_name=$(awk '/^name:/ { print $2; exit }' "$CHART_DIR/Chart.yaml")
+          package=".cr-release-packages/${chart_name}-${VERSION}.tgz"
+          registry="ghcr.io"
+          oci_prefix="${registry}/${GITHUB_REPOSITORY_OWNER,,}/charts"
+          echo "${GH_TOKEN}" | helm registry login "$registry" \
+            --username "$GITHUB_ACTOR" --password-stdin
+          helm push "$package" "oci://${oci_prefix}"
+          helm registry logout "$registry"
+          echo "::notice::published ${oci_prefix}/${chart_name}:${VERSION}"
+
       # The tag is the source of truth, so the branch records the release after
       # the fact: a commit whose only change is the version line. A push made
       # with GITHUB_TOKEN starts no run by itself, and `[skip ci]` keeps the
@@ -856,4 +882,5 @@ jobs:
             echo "- \`${TAG}\` published from the ${CHANNEL} track"
             echo "- chart version recorded on main: \`${VERSION}\`"
             echo "- index: https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/index.yaml"
+            echo "- OCI: \`helm install <release> oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts/tuwunel --version ${VERSION}\`"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -91,7 +91,9 @@ helm package charts/tuwunel
   path packages "charts changed since the previous tag" and its script dies on an unbound variable
   when packaging is skipped (fixed on its `main`, unreleased). Finally it commits
   `chore(release): record <tag> [skip ci]` to `main`, recording the released `version`. Nothing is
-  published without a tag push: a merge publishes nothing.
+  published without a tag push: a merge publishes nothing. The packaged chart is also pushed to
+  GHCR (`oci://ghcr.io/<owner-lowercase>/charts/<chart>`, job permission `packages: write`), so the
+  chart installs OCI-side too.
 
 Rules that keep this honest:
 
