@@ -27,6 +27,13 @@ helm repo add tuwunel https://arsolitt.github.io/tuwunel-helm
 helm repo update
 ```
 
+The chart is also published to GHCR as an OCI artifact, which needs no repository at all:
+
+```console
+helm install my-release --set server_name=matrix.example.org \
+  oci://ghcr.io/arsolitt/charts/tuwunel --version 2.2.2
+```
+
 ## TL;DR
 
 ```console

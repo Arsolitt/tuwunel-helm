@@ -74,6 +74,13 @@ If you would rather install exactly the chart you reviewed, point Helm at the ch
 $ helm install my-release charts/tuwunel -f values.yaml
 ```
 
+The chart is also published to GHCR as an OCI artifact — no `helm repo add` and no
+`helm repo update`; pin the version explicitly:
+
+```console
+$ helm install my-release oci://ghcr.io/arsolitt/charts/tuwunel --version 2.2.2 -f values.yaml
+```
+
 ## What the chart creates
 
 A default install of release `my-release` in namespace `default` renders exactly these objects (verified with `helm template my-release charts/tuwunel`):
