@@ -14,6 +14,21 @@ of the version; its heading date is the day the section was opened.
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.2.2] - 2026-10-17
+
+### Added
+
+- **The chart is published to GHCR as an OCI artifact.** Every release pushes the same package the
+  GitHub release asset comes from to `ghcr.io/arsolitt/charts/tuwunel`, so an install needs no
+  `helm repo add` at all:
+
+  ```console
+  helm install my-release oci://ghcr.io/arsolitt/charts/tuwunel --version 2.2.2
+  ```
+
+  The GitHub Pages repository keeps working unchanged. Nothing in the chart itself changed: no
+  template, value or default is different from 2.2.1.
+
 ## [2.2.1] - 2026-10-02
 
 ### Changed
