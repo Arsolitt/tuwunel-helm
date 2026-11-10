@@ -14,6 +14,26 @@ of the version; its heading date is the day the section was opened.
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.2.3] - 2026-11-10
+
+### Changed
+
+- **The default image is tuwunel v1.9.4.** `appVersion` and the `image.tag` default follow the
+  10 October 2026 upstream release; no template, value or schema changed, so the only difference
+  from 2.2.2 is the image a default-value install runs.
+
+  v1.9.4 adds a Google Cloud Storage media provider, a choice of provider on the native OIDC
+  authorization and device-login pages, profile-read / display-name / room-alias controls, and
+  per-account password login rate limits, alongside a long list of federation fixes. It also moves
+  upstream defaults the chart does not set: `ip_range_denylist` gains `0.0.0.0/8` and `::/128`,
+  `servername_status_cache_capacity` scales with the available CPUs, and commands escaped from
+  outside the admin room (`admin_escape_commands`) are off unless enabled. The first start on an
+  existing database runs a one-time repair pass for short-id residue left by releases before the
+  short-id fix.
+
+  `ci/overrides-values.yaml` keeps its pin one release behind the default (`v1.9.3`), so the
+  runtime gate starts both upstream releases.
+
 ## [2.2.2] - 2026-10-17
 
 ### Added
