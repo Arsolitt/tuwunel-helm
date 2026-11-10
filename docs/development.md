@@ -88,7 +88,7 @@ Three folders, one meaning each. The folder is the contract: a fixture in the wr
 | `service-loadbalancer-values.yaml` | The homeserver Service published by a cloud load balancer: `service.type: LoadBalancer` plus `loadBalancerSourceRanges`, which must render without the headless `clusterIP` |
 | `storage-and-backup-values.yaml` | S3-backed media storage plus online backups on the default `0 3 * * *` schedule; the runtime job falls back to the crontab's own signal for this one and expects a backup repository under `backup.path` |
 
-Two rules shape a scenario. It must render, and the `runtime` job starts its tuwunel container - which is why `overrides-values.yaml` pins `image.tag: v1.9.2` and the init-container tag: the runtime job starts that exact image. The backup sidecar is the one sidecar the runtime job starts, and only for a scenario whose rendered schedule can fire inside its wait window; nothing in CI installs a Gateway controller or a Gateway: the media routes are rendered and schema-validated, not exercised.
+Two rules shape a scenario. It must render, and the `runtime` job starts its tuwunel container - which is why `overrides-values.yaml` pins `image.tag: v1.9.3` and the init-container tag: the runtime job starts that exact image. The backup sidecar is the one sidecar the runtime job starts, and only for a scenario whose rendered schedule can fire inside its wait window; nothing in CI installs a Gateway controller or a Gateway: the media routes are rendered and schema-validated, not exercised.
 
 ### Schema-rejected fixtures - `charts/tuwunel/ci/invalid/`
 
@@ -101,7 +101,7 @@ Two rules shape a scenario. It must render, and the `runtime` job starts its tuw
 | `env-name-invalid.yaml` | `env` key `2FA_TOKEN` - a container env name Kubernetes refuses (`^[-._a-zA-Z][-._a-zA-Z0-9]*$`), which would otherwise reach the API server |
 | `extra-env-without-value.yaml` | `extraEnv` entry lacking `value` |
 | `image-pull-policy.yaml` | `image.pullPolicy: Sometimes` |
-| `image-repository-empty.yaml` | `image.repository: ""` - an empty repository renders `:v1.9.2`, which the kubelet refuses as `InvalidImageName` |
+| `image-repository-empty.yaml` | `image.repository: ""` - an empty repository renders `:v1.9.4`, which the kubelet refuses as `InvalidImageName` |
 | `image-tag-empty.yaml` | `image.tag: ""` - the tag is rendered verbatim after the `:` separator, so an empty one renders `ghcr.io/matrix-construct/tuwunel:` |
 | `ip-source-typo.yaml` | `config.global.ip_source: xforwarded_for` |
 | `persistence-access-mode.yaml` | `persistence.data.accessMode: ReadWriteManyy` |

@@ -24,7 +24,7 @@
 | Helm | The repository documents no minimum Helm version — its CI pins Helm 4.3.0. The chart needs plain `helm install`/`test`/`uninstall` and no plugins or post-renderers. |
 | A `server_name` | The Matrix domain clients and user IDs use. It is a required value: the schema requires the key and a non-empty string, and the StatefulSet template carries a second `required()` guard. |
 | A PersistentVolume provisioner | The default install creates a 4Gi `ReadWriteOnce` claim for `/data`. A cluster with a default StorageClass needs nothing; otherwise set `persistence.data.storageClass` yourself, or pre-create a PV and use the `"-"` sentinel. |
-| tuwunel v1.9.0 or newer | The chart configures the server through the `TUWUNEL_*` environment contract and probes it with `tuwunel --health-check`, both introduced in v1.9.0. The chart pins `ghcr.io/matrix-construct/tuwunel:v1.9.2`. |
+| tuwunel v1.9.0 or newer | The chart configures the server through the `TUWUNEL_*` environment contract and probes it with `tuwunel --health-check`, both introduced in v1.9.0. The chart pins `ghcr.io/matrix-construct/tuwunel:v1.9.4`. |
 | An exposure layer (optional) | Nothing is reachable outside the cluster after a bare install. If you want clients to connect, you also need an ingress controller or a Gateway you run — the chart never creates TLS material, an IngressClass, a Gateway or a GatewayClass. |
 
 Below the version floor Helm fails before rendering anything:
@@ -162,7 +162,7 @@ Values that matter for a first install, with their defaults:
 | `persistence.data.accessMode` | `ReadWriteOnce` | Access mode of that claim |
 | `persistence.data.storageClass` | `""` | `""`/unset → no `storageClassName` (cluster default); `"-"` → `storageClassName: ""` to bind a pre-created PV by hand; anything else → that class. `"-"` is a sentinel, not a class name — mistyping a class leaves the claim unbound. |
 | `service.port` | `8080` | The chart's single port knob: Service port, container port and `TUWUNEL_PORT` |
-| `image.tag` | `v1.9.2` | Server image tag; must be v1.9.0 or newer |
+| `image.tag` | `v1.9.4` | Server image tag; must be v1.9.0 or newer |
 | `config.global.address` | `"::"` | Address the server binds; use `0.0.0.0` only in a pod network without a usable IPv6 stack |
 | `config.global.allow_registration` | `false` | Registration stays closed until you turn it on (see [Creating the first account](#creating-the-first-account)) |
 | `config.global.allow_federation` | `false` | Federation stays closed until you enable it (see [Federation and delegation](./federation.md)) |
