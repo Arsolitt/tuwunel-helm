@@ -52,7 +52,7 @@ serverNameWellKnownOnly: false
 
 image:
   repository: ghcr.io/matrix-construct/tuwunel
-  tag: v1.9.3
+  tag: v1.9.4
   pullPolicy: IfNotPresent
 
 ## Init container for envsubst.

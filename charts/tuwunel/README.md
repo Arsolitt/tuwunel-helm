@@ -94,7 +94,7 @@ The following tables list the configurable parameters of the tuwunel chart and t
 | `includeServerName`                | Whether the host fields derived from `server_name` are rendered (Ingress, TLS, HTTPRoute)   | `true`                             |
 | `serverNameWellKnownOnly`          | Whether the `server_name` host serves only `/.well-known/matrix`                            | `false`                            |
 | `image.repository`                 | Image repository                                                                            | `ghcr.io/matrix-construct/tuwunel` |
-| `image.tag`                        | Image tag; needs v1.9.0 or newer for the chart's env and probe contract                      | `v1.9.3`                           |
+| `image.tag`                        | Image tag; needs v1.9.0 or newer for the chart's env and probe contract                      | `v1.9.4`                           |
 | `image.pullPolicy`                 | Image pull policy                                                                           | `IfNotPresent`                     |
 | `initContainer.image.repository`   | Init container image for envsubst                                                           | `dibi/envsubst`                    |
 | `initContainer.image.tag`          | Init container image tag                                                                    | `1`                                |
@@ -1042,7 +1042,7 @@ ingress:
 server_name: "matrix.example.org"
 
 image:
-  tag: "v1.9.3"
+  tag: "v1.9.4"
 
 persistence:
   data:

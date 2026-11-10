@@ -12,7 +12,7 @@ nameOverride: tuwunel-ci
 server_name: matrix.ci.example
 
 image:
-  tag: "v1.9.2"
+  tag: "v1.9.3"
 
 initContainer:
   image:

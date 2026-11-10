@@ -23,7 +23,7 @@
 | Field | Value | What it decides |
 | --- | --- | --- |
 | `version` | written by the release job | The chart release. `hack/release.sh` cuts a `v<version>` tag, the release job packages that tag and records its version here afterwards, and the published index entry points at the release; the 2.1.0-2.2.0 releases keep the `release-<version>` tag, and the releases up to 2.0.2 the `tuwunel-<version>` tag the tooling of the time created. |
-| `appVersion` | `v1.9.3` | Metadata only: the tuwunel release the defaults target. The image the pod runs comes from `image.tag` (default `v1.9.3`) — no template reads `appVersion`. |
+| `appVersion` | `v1.9.4` | Metadata only: the tuwunel release the defaults target. The image the pod runs comes from `image.tag` (default `v1.9.4`) — no template reads `appVersion`. |
 | `kubeVersion` | `>=1.31.0-0` | Enforced by Helm before anything is rendered. A cluster below 1.31 cannot take the chart at all. `kubeVersion` was introduced by 2.0.0. |
 
 Separate from all three is the application floor: **the chart requires tuwunel v1.9.0 or newer**.
