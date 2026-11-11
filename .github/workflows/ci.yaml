@@ -741,7 +741,7 @@ jobs:
       # upload has already succeeded - fixed on the action's `main`, unreleased
       # as of v1.7.0. `cr index` is what is needed from the binary.
       - name: Install chart-releaser
-        uses: helm/chart-releaser-action@v1.7.0
+        uses: helm/chart-releaser-action@v1.9.0
         with:
           version: ${{ env.CHART_RELEASER_VERSION }}
           install_only: true
